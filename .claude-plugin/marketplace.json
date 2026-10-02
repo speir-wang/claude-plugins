@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "he-wang",
+  "description": "Claude Code plugins by He Wang",
+  "owner": { "name": "He Wang", "url": "https://github.com/speir-wang" },
+  "plugins": [
+    {
+      "name": "todo-commits",
+      "description": "A todo panel for Claude Code: each todo links to its commit, and a click shows the message and diff",
+      "author": { "name": "He Wang" },
+      "category": "productivity",
+      "source": "./plugins/todo-commits"
+    }
+  ]
+}
