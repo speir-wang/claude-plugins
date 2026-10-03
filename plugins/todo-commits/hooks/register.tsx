@@ -215,7 +215,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('tool.call', { tool: TOOL }, async ($, e) => {
+  on('tool.call', { tool: 'mcp__todo-commits__todos' }, async ($, e) => {
     const answer = await runTodosTool($, e as TodosInput)
     // Claude is changing the list: show it, so its one-line rows never stand alone.
     if (!(await isPaneOpen($))) {
@@ -291,7 +291,7 @@ export const register: Register = on => {
     }
   })
 
-  on('ui.render', { component: 'Pane', requestId: TODO_PANE }, async ($, e) => {
+  on('ui.render', { component: 'Pane', requestId: 'todo-commits' }, async ($, e) => {
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const view = await read($, commit)
     if (view !== null) {
