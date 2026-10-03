@@ -12,6 +12,7 @@ export type FindingActions = {
   wontFix: () => void | Promise<void>
   ask: () => void | Promise<void>
   drop: () => void | Promise<void>
+  togglePending: () => void | Promise<void>
   edit: () => void | Promise<void>
   saveEdit: (text: string) => void | Promise<void>
   rewrite: () => void | Promise<void>
@@ -91,6 +92,13 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
           )}
           {view.isRewriting === true && <Text dimColor>Rewriting…</Text>}
           <Box flexDirection="row" columnGap={1} marginTop={1}>
+            <Button
+              key="pending"
+              label={finding.status === 'pending' ? 'Remove from review' : 'Add to review'}
+              variant="primary"
+              hotkey="p"
+              onPress={actions.togglePending}
+            />
             <Button key="drop" label="Drop" hotkey="d" onPress={actions.drop} />
             <Button key="edit" label="Edit" hotkey="e" onPress={actions.edit} />
             <Button key="rewrite" label="Rewrite" hotkey="r" onPress={actions.rewrite} />

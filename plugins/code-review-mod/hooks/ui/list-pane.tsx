@@ -16,6 +16,7 @@ export type ListData = {
 export type ListActions = {
   open: (n: number) => void | Promise<void>
   flipMode: () => void | Promise<void>
+  submit: () => void | Promise<void>
 }
 
 /** Draws the review: the Standards and Spec sections, each sorted by score. */
@@ -41,6 +42,11 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
           {open} open · {pending} pending · {done} done
         </Text>
       </Box>
+      {review.mode === 'theirs' && pending > 0 && (
+        <Box key="submit-box" marginBottom={1}>
+          <Button key="submit" label={`${pending} pending · Submit review`} variant="primary" onPress={actions.submit} />
+        </Box>
+      )}
       {sections.map(section => (
         <Box key={`s-${section.group}`} flexDirection="column" marginBottom={1}>
           <Box flexDirection="row">

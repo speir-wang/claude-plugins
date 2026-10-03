@@ -447,3 +447,74 @@ test('a rewrite with no answer keeps the draft and says so', async ($, on) => {
   expect(await texts(drawn)).toContain('Could this number get a name, so readers know it is the retry wait?')
   expect((await texts(drawn)).join(' ')).toMatch('Rewrite failed')
 })
+
+const POST = 'gh api repos/acme/shop/pulls/7/reviews --method POST --input -'
+
+test('Add to review puts a draft in the pending pile without posting it; Remove takes it out', async ($, on) => {
+  const w = world(on)
+  const drawn = await openTheirs($)
+
+  await drawn.press({ key: 'pending' })
+  expect(await texts(drawn)).toContain('in review')
+  expect(String((await drawn.find({ key: 'submit' }))?.props.label)).toBe('1 pending · Submit review')
+  expect(w.ran).toEqual([])
+
+  await drawn.press({ key: 'f-1' })
+  expect(String((await drawn.find({ key: 'pending' }))?.props.label)).toBe('Remove from review')
+  await drawn.press({ key: 'pending' })
+  expect(await drawn.find({ key: 'submit' })).toBeUndefined()
+  expect(await texts(drawn)).toContain('1 open · 0 pending · 0 done')
+})
+
+test('Submit asks first, with Comment picked, then posts one review with each comment on its line', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = '{"id": 1}'
+  const drawn = await openTheirs($)
+  await drawn.press({ key: 'pending' })
+
+  await drawn.press({ key: 'submit' })
+  expect(w.ran).toEqual([])
+  expect(String((await drawn.find({ key: 'event-COMMENT' }))?.props.label)).toMatch('●')
+  expect(String((await drawn.find({ key: 'event-APPROVE' }))?.props.label)).toMatch('○')
+  await drawn.press({ key: 'post' })
+
+  expect(w.ran).toEqual([POST])
+  const sent = JSON.parse(w.stdin[POST]!)
+  expect(sent.event).toBe('COMMENT')
+  expect(sent.commit_id).toBe(HEAD)
+  expect(sent.comments).toEqual([
+    { path: 'src/app.ts', line: 12, side: 'RIGHT', body: 'Could this number get a name, so readers know it is the retry wait?\n\n```\nconst RETRY_MS = 3000\n```' },
+  ])
+  expect(await texts(drawn)).toContain('✔ posted')
+  expect(await drawn.find({ key: 'submit' })).toBeUndefined()
+})
+
+test('Request changes is posted only when picked; Cancel posts nothing', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = '{"id": 1}'
+  const drawn = await openTheirs($)
+  await drawn.press({ key: 'pending' })
+
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'cancel' })
+  expect(w.ran).toEqual([])
+  expect(await texts(drawn)).toContain('in review')
+
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'event-REQUEST_CHANGES' })
+  await drawn.press({ key: 'post' })
+  expect(JSON.parse(w.stdin[POST]!).event).toBe('REQUEST_CHANGES')
+})
+
+test('when GitHub refuses the review, the drafts stay pending and the panel says why', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = { exitCode: 1, stderr: 'HTTP 422: line must be part of the diff' }
+  const drawn = await openTheirs($)
+  await drawn.press({ key: 'pending' })
+
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'post' })
+
+  expect((await texts(drawn)).join(' ')).toMatch('HTTP 422: line must be part of the diff')
+  expect(await drawn.find({ key: 'post' })).toBeDefined()
+})

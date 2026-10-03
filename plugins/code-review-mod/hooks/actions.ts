@@ -1,7 +1,8 @@
-import type { Finding } from '../types'
+import type { Finding, ReviewEvent } from '../types'
 
 import { TODO_TOOL, TOOL } from './config'
 import { rewriteDraft } from './draft'
+import { postReview } from './github'
 import { flipMode } from './mode'
 import type { Ports } from './ports'
 import { changeFinding, setStatus } from './review'
@@ -119,4 +120,43 @@ export async function rewrite(p: Pick<Ports, 'review' | 'view' | 'notice' | 'com
     await p.review.update(review => (review === null ? review : changeFinding(review, n, f => ({ ...f, draft }))))
   }
   await p.view.update(view => (view.kind === 'finding' && view.n === n ? { kind: 'finding', n } : view))
+}
+
+/** Add to review / Remove from review: moves a draft in or out of the pending pile. Nothing is posted. */
+export async function togglePending(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
+  await p.review.update(review =>
+    review === null ? review : changeFinding(review, n, f => ({ ...f, status: f.status === 'pending' ? 'open' : 'pending' })),
+  )
+  await backToList(p)
+}
+
+/** Submit review: the confirm step, with Comment picked. */
+export async function showSubmit(p: ViewPorts & Pick<Ports, 'notice'>) {
+  await p.notice.update(() => '')
+  await p.view.update(() => ({ kind: 'submit', event: 'COMMENT' }))
+  await p.openPane({ closeOnEscape: true })
+}
+
+/** Picks Comment, Request changes or Approve in the confirm step. */
+export async function pickEvent(p: Pick<Ports, 'view'>, event: ReviewEvent) {
+  await p.view.update(view => (view.kind === 'submit' ? { ...view, event } : view))
+}
+
+/** Posts every pending draft as one review; on success they are posted, else they stay and the panel says why. */
+export async function submitReview(p: Pick<Ports, 'review' | 'view' | 'notice' | 'run' | 'openPane'>) {
+  const review = await p.review.get()
+  const view = await p.view.get()
+  if (review === null || view.kind !== 'submit') {
+    return
+  }
+  const pending = review.findings.filter(f => f.status === 'pending')
+  const failed = await postReview(p, review.pr, review.rounds.at(-1)?.head ?? '', view.event, pending)
+  if (failed !== undefined) {
+    await p.notice.update(() => `Not posted: ${failed}`)
+    return
+  }
+  const posted = new Set(pending.map(f => f.n))
+  await p.review.update(r => (r === null ? r : { ...r, findings: r.findings.map(f => (posted.has(f.n) ? { ...f, status: 'posted' as const } : f)) }))
+  await p.notice.update(() => '')
+  await backToList(p)
 }

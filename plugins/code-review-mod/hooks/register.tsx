@@ -3,12 +3,28 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ReviewInput } from '../types'
 
-import { askAbout, backToList, drop, fixIt, openFinding, rewrite, saveEdit, showInput, switchMode, wontFix } from './actions'
+import {
+  askAbout,
+  backToList,
+  drop,
+  fixIt,
+  openFinding,
+  pickEvent,
+  rewrite,
+  saveEdit,
+  showInput,
+  showSubmit,
+  submitReview,
+  switchMode,
+  togglePending,
+  wontFix,
+} from './actions'
 import { PANE, PANE_TITLE, RULE, TOOL } from './config'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
 import { drawFindingPane } from './ui/finding-pane'
 import { drawListPane } from './ui/list-pane'
+import { drawSubmitPane } from './ui/submit-pane'
 import { toolRowLine } from './ui/rows'
 import { drawEmptyResult, drawToolRow } from './ui/tool-row'
 
@@ -108,6 +124,7 @@ export const register: Register = on => {
         wontFix: () => wontFix(ports($), n),
         ask: () => askAbout(ports($), n),
         drop: () => drop(ports($), n),
+        togglePending: () => togglePending(ports($), n),
         edit: () => showInput(ports($), n, 'edit'),
         saveEdit: text => saveEdit(ports($), n, text),
         rewrite: () => showInput(ports($), n, 'rewrite'),
@@ -115,7 +132,19 @@ export const register: Register = on => {
       })
     }
 
-    return drawListPane(parts, { review: current, columns }, { open: n => openFinding(ports($), n), flipMode: () => switchMode(ports($)) })
+    if (current !== null && shown.kind === 'submit') {
+      return drawSubmitPane(parts, current, shown.event, await read($, notice), {
+        pick: event => pickEvent(ports($), event),
+        post: () => submitReview(ports($)),
+        cancel: () => backToList(ports($)),
+      })
+    }
+
+    return drawListPane(
+      parts,
+      { review: current, columns },
+      { open: n => openFinding(ports($), n), flipMode: () => switchMode(ports($)), submit: () => showSubmit(ports($)) },
+    )
   })
 
   // The review tool's calls draw as one line; the panel shows the review itself.
