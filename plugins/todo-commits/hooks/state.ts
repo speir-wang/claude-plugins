@@ -1,6 +1,8 @@
 import type { ModelCompleteRequest, ModelCompleteResult } from 'claude-code'
 
-import type { CommitView, Earlier, Place, Todo } from '../types'
+import type { CommitView, Earlier, Place, Todo, TodoStatus } from '../types'
+
+import { setStatus as withStatus } from './todo-list'
 
 /** One value the plugin keeps in `$.state`, read and changed through two small calls. */
 export type Cell<T> = {
@@ -40,5 +42,13 @@ export async function changeTodos(p: Ports, change: (list: Todo[]) => Todo[]) {
   const here = await p.place.get()
   if (here !== null) {
     await p.storeSet(`todos:${here.key}`, list)
+  }
+}
+
+/** Sets a todo's status (and title); the one that starts becomes the last active one. */
+export async function setStatus(p: Ports, id: string, status: TodoStatus | 'deleted', title?: string) {
+  await changeTodos(p, list => withStatus(list, id, status, title))
+  if (status === 'in_progress') {
+    await p.lastActiveId.update(() => id)
   }
 }

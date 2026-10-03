@@ -3,15 +3,15 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, Todo, TodoStatus } from '../types'
 
-import { COMMIT_RULE, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
-import { changeTodos } from './state'
+import { COMMIT_RULE, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL } from './config'
+import { changeTodos, setStatus } from './state'
 import type { Ports } from './state'
 import { backToList, showCommit, showWorking, toggleFile } from './commit-view'
-import { tidyTitle } from './model'
+import { COMMAND, TOOL as TOOL_DEF, runCommand, runTool } from './todo-tool'
 import { afterBash, beforeTodosOpen, linkNewCommits, syncPlace } from './sync'
 import { earlierSummary, fit, progressBar, rowLook, toolRowLine } from './ui/rows'
 import type { ToolInput } from './ui/rows'
-import { addTodos, fromTodoWrite, linkCommits, listText, pickTarget, progress, renameTodo, setStatus as withStatus } from './todo-list'
+import { fromTodoWrite, renameTodo } from './todo-list'
 
 const todos = atom({ plugin: 'todo-commits', key: 'todos' } as const, [])
 const head = atom({ plugin: 'todo-commits', key: 'head' } as const, '')
@@ -68,91 +68,13 @@ async function openIfNew($: $, hadTodos: boolean) {
   }
 }
 
-async function setStatus($: $, id: string, status: TodoStatus | 'deleted', title?: string) {
-  await changeTodos(ports($), list => withStatus(list, id, status, title))
-  if (status === 'in_progress') {
-    await update($, lastActiveId, () => id)
-  }
-}
-
-type TodosInput = ToolInput
-
-type TodosAnswer = { text: string; isError?: true }
-
-/**
- * Serves the mod's own todo tool. "add" answers with the whole numbered list,
- * so the model learns the numbers; the rest answer in one line.
- */
-async function runTodosTool($: $, input: TodosInput): Promise<TodosAnswer> {
-  const list = await read($, todos)
-  const position = typeof input.number === 'number' ? input.number : NaN
-  const picked = list[position - 1]
-
-  if (input.action === 'add') {
-    const titles = Array.isArray(input.titles)
-      ? input.titles.filter((t): t is string => typeof t === 'string' && t.trim() !== '')
-      : []
-    if (titles.length === 0) {
-      return { text: 'Nothing added: "titles" needs at least one title.', isError: true }
-    }
-    const stamp = await $.clock.now()
-    await changeTodos(ports($), current => addTodos(current, titles, stamp))
-
-    return { text: listText(await read($, todos)) }
-  }
-  if (input.action === 'start' || input.action === 'done') {
-    if (picked === undefined) {
-      return { text: `No todo number ${String(input.number)}. There are ${list.length}.`, isError: true }
-    }
-    if (input.action === 'done') {
-      // A commit made just before "done" still belongs to this todo.
-      await linkNewCommits(ports($))
-    }
-    await setStatus($, picked.id, input.action === 'start' ? 'in_progress' : 'completed')
-    await update($, lastActiveId, () => picked.id)
-    const now = await read($, todos)
-    const { done } = progress(now)
-
-    return input.action === 'start'
-      ? { text: `Started ${position}: ${picked.title}` }
-      : { text: `Done ${position}: ${picked.title} (${done} of ${now.length} done)` }
-  }
-  if (input.action === 'clear') {
-    await changeTodos(ports($), () => [])
-    await update($, lastActiveId, () => '')
-
-    return { text: 'The todo list is empty.' }
-  }
-
-  return { text: 'Unknown action. Use "add", "start", "done" or "clear".', isError: true }
-}
-
 export const register: Register = on => {
   let spinner: Timer | undefined
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.command.register({
-      name: 'todos',
-      description: 'Show or hide the todo panel; "/todos add <text>" adds a todo, "/todos clear" empties the list',
-      argumentHint: '[add <text> | clear]',
-    })
-    await $.tool.register({
-      name: TOOL_NAME,
-      description:
-        "The user's todo panel. \"add\" appends steps as not started (titles). " +
-        '"start" and "done" take a todo\'s number (1 is the first). "clear" empties the list. ' +
-        'Answers with the numbered list.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          action: { type: 'string', enum: ['add', 'start', 'done', 'clear'] },
-          titles: { type: 'array', items: { type: 'string' }, description: 'For "add": one short title per step.' },
-          number: { type: 'integer', minimum: 1, description: 'For "start" and "done": the todo\'s number.' },
-        },
-        required: ['action'],
-      },
-    })
+    await $.command.register(COMMAND)
+    await $.tool.register(TOOL_DEF)
     await syncPlace(ports($))
     spinner?.cancel()
     spinner = $.clock.every(SPIN_MS, () => {
@@ -167,38 +89,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'todos' }, async ($, e) => {
-    // Plain "/todos" toggles; "add" and "clear" always leave the pane open.
-    if (e.args.trim() === '' && (await isPaneOpen($))) {
-      await $.ui.close({ id: TODO_PANE })
-      return { text: 'Todo panel closed. Claude no longer commits after each todo.' }
-    }
-    await beforeTodosOpen(ports($))
-    await openPane($, { title: 'Todos' })
-
-    if (/^clear$/i.test(e.args.trim())) {
-      const count = (await read($, todos)).length
-      await runTodosTool($, { action: 'clear' })
-      return { text: `Cleared ${count} ${count === 1 ? 'todo' : 'todos'}. The list is empty now; old todo numbers no longer apply.` }
-    }
-
-    const adding = e.args.trim().match(/^add(?:\s+([\s\S]*))?$/i)
-    if (adding === null) {
-      return { text: 'Todo panel opened. Claude will commit after each todo while it is open.' }
-    }
-    const title = adding[1]?.trim() ?? ''
-    if (title === '') {
-      return { text: 'Nothing added. Write the todo after "add", like: /todos add Bump the theme version' }
-    }
-    await runTodosTool($, { action: 'add', titles: [title] })
-    const added = (await read($, todos)).at(-1)
-    const count = (await read($, todos)).length
-    // The row shows the typed words at once; the tidy title replaces them when it comes.
-    const tidy = await tidyTitle(ports($), title)
-    if (added !== undefined && tidy !== undefined) {
-      await changeTodos(ports($), list => renameTodo(list, added.id, tidy))
-    }
-
-    return { text: `Added todo ${count}: ${tidy ?? title}` }
+    return { text: await runCommand(ports($), e.args) }
   })
 
   on('ui.close', async ($, e, next) => {
@@ -216,7 +107,7 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__todo-commits__todos' }, async ($, e) => {
-    const answer = await runTodosTool($, e as TodosInput)
+    const answer = await runTool(ports($), e as ToolInput)
     // Claude is changing the list: show it, so its one-line rows never stand alone.
     if (!(await isPaneOpen($))) {
       await openPane($, { title: 'Todos' })
@@ -244,7 +135,7 @@ export const register: Register = on => {
       return ran
     }
     if (e.status !== undefined) {
-      await setStatus($, e.taskId, e.status, e.subject)
+      await setStatus(ports($), e.taskId, e.status, e.subject)
     } else if (e.subject !== undefined) {
       const subject = e.subject
       await changeTodos(ports($), list => renameTodo(list, e.taskId, subject))
@@ -519,7 +410,7 @@ export const register: Register = on => {
       return next(e)
     }
     const { Box, Text } = $.ui.resolve(e)
-    const { icon, color, text } = toolRowLine((input ?? {}) as TodosInput, await read($, todos))
+    const { icon, color, text } = toolRowLine((input ?? {}) as ToolInput, await read($, todos))
 
     return (
       <Box flexDirection="row">
