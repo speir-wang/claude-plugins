@@ -160,3 +160,18 @@ export async function submitReview(p: Pick<Ports, 'review' | 'view' | 'notice' |
   await p.notice.update(() => '')
   await backToList(p)
 }
+
+/** Replace: the review that came in takes the place of the one shown. */
+export async function replaceReview(p: Pick<Ports, 'review' | 'incoming'> & ViewPorts) {
+  const waiting = await p.incoming.get()
+  if (waiting !== null) {
+    await p.review.update(() => waiting.review)
+    await p.incoming.update(() => null)
+  }
+  await backToList(p)
+}
+
+/** Keep: the review shown stays; what the new one records is let go. */
+export async function keepReview(p: Pick<Ports, 'incoming'>) {
+  await p.incoming.update(waiting => (waiting === null ? null : { ...waiting, answer: 'keep' }))
+}

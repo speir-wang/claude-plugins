@@ -1,4 +1,4 @@
-import type { FindingStatus, Group, ReviewInput } from '../types'
+import type { FindingStatus, Group, Incoming, ReviewInput } from '../types'
 
 import { startFix } from './actions'
 
@@ -45,7 +45,7 @@ export const TOOL_SPEC = {
 export type ToolAnswer = { text: string; isError?: true }
 
 /** What serving the tool needs. */
-export type ToolPorts = Pick<Ports, 'review' | 'isChanged' | 'toolNames' | 'callTool'>
+export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'toolNames' | 'callTool'>
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
@@ -56,6 +56,11 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   if (pr === '' || head === '') {
     return fail('"pr" and "head" are needed.')
   }
+  const waiting = await p.incoming.get()
+  if (waiting?.answer === 'ask' && waiting.review.pr === pr) {
+    return { text: `Review of ${pr} is open. The panel asks the user whether it replaces the one shown. Record findings as usual.` }
+  }
+  await p.incoming.update(() => null)
   const current = await p.review.get()
   if (current !== null && current.pr === pr) {
     if (current.rounds.at(-1)?.head === head) {
@@ -65,6 +70,11 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
     return { text: `Round ${next === null ? 1 : currentRound(next)} of ${pr} started.` }
   }
   const mode = pickMode(pr, input.mode)
+  if (current !== null && current.findings.length > 0) {
+    // The panel asks before replacing; the review goes on either way.
+    await p.incoming.update(() => ({ review: newReview(pr, mode, head), answer: 'ask' }))
+    return { text: `Review of ${pr} started. The panel asks the user whether it replaces the one shown. Record findings as usual.` }
+  }
   await p.review.update(() => newReview(pr, mode, head))
 
   return { text: `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).` }
@@ -93,15 +103,41 @@ async function changeStatus(p: ToolPorts, input: ReviewInput): Promise<ToolAnswe
   return { text: `#${number} is ${status === 'wontfix' ? "won't fix" : status}.` }
 }
 
+/**
+ * Records into the review waiting for the user's answer. Once they chose to
+ * keep the old one, the new review's findings are let go, but Claude is told
+ * all went well: the question only decides what the panel keeps.
+ */
+async function recordIncoming(p: ToolPorts, input: ReviewInput, waiting: Incoming): Promise<ToolAnswer> {
+  if (input.action === 'skipped') {
+    const group = input.group === 'spec' ? 'spec' : 'standards'
+    await p.incoming.update(w => (w === null ? w : { ...w, review: skipGroup(w.review, group, typeof input.reason === 'string' ? input.reason : 'not run') }))
+    return { text: `${group === 'spec' ? 'Spec' : 'Standards'} skipped.` }
+  }
+  const finding = readFinding(input, waiting.review)
+  if (typeof finding === 'string') {
+    return fail(`Not added: ${finding}`)
+  }
+  if (waiting.answer === 'ask') {
+    await p.incoming.update(w => (w === null ? w : { ...w, review: { ...w.review, findings: [...w.review.findings, finding] } }))
+  }
+
+  return { text: `Added #${finding.n}: ${finding.title}` }
+}
+
 /** Serves the review tool. Every answer is one line. */
 export async function runTool(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   if (input.action === 'start') {
     return start(p, input)
   }
-  const review = await p.review.get()
   if (input.action !== 'add' && input.action !== 'skipped' && input.action !== 'set-status') {
     return fail('Unknown action. Use "start", "add", "skipped", "outcome" or "set-status".')
   }
+  const waiting = await p.incoming.get()
+  if (waiting !== null && (input.action === 'add' || input.action === 'skipped')) {
+    return recordIncoming(p, input, waiting)
+  }
+  const review = await p.review.get()
   if (review === null) {
     return fail('No review is open. Call "start" first.')
   }

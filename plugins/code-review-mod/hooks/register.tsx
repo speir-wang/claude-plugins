@@ -9,7 +9,9 @@ import {
   drop,
   fixIt,
   openFinding,
+  keepReview,
   pickEvent,
+  replaceReview,
   rewrite,
   saveEdit,
   showInput,
@@ -115,6 +117,7 @@ export const register: Register = on => {
     const columns = e.props.bodyColumns ?? 60
     const shown = await read($, view)
     const current = await read($, review)
+    const waiting = await read($, incoming)
     const finding = shown.kind === 'finding' ? current?.findings.find(f => f.n === shown.n) : undefined
     if (current !== null && finding !== undefined && shown.kind === 'finding') {
       const n = finding.n
@@ -142,8 +145,14 @@ export const register: Register = on => {
 
     return drawListPane(
       parts,
-      { review: current, columns },
-      { open: n => openFinding(ports($), n), flipMode: () => switchMode(ports($)), submit: () => showSubmit(ports($)) },
+      { review: current, asking: waiting?.answer === 'ask' ? waiting.review.pr : null, columns },
+      {
+        open: n => openFinding(ports($), n),
+        flipMode: () => switchMode(ports($)),
+        submit: () => showSubmit(ports($)),
+        replace: () => replaceReview(ports($)),
+        keep: () => keepReview(ports($)),
+      },
     )
   })
 

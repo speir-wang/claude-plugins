@@ -286,6 +286,9 @@ test('the top row shows the PR, whose it is and the counts; the tip fits the mod
   expect(mine).toMatch('one review per session')
 
   await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+  const asked = await pane($)
+  await asked.press({ key: 'replace' })
+  await asked.unmount()
   const theirs = await paneText($)
   expect(theirs).toMatch('acme/shop#7')
   expect(theirs).toMatch('their PR')
@@ -517,4 +520,48 @@ test('when GitHub refuses the review, the drafts stay pending and the panel says
 
   expect((await texts(drawn)).join(' ')).toMatch('HTTP 422: line must be part of the diff')
   expect(await drawn.find({ key: 'post' })).toBeDefined()
+})
+
+test('a review of another PR asks once before replacing; Replace shows the new one', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+  const added = await review($, { ...FINDING, title: 'From the new PR' })
+  expect(started.isError).toBe(false)
+  expect(added.isError).toBe(false)
+
+  const drawn = await pane($)
+  expect((await texts(drawn)).join(' ')).toMatch('Replace the review of feature with acme/shop#7?')
+  expect(String((await drawn.find({ key: 'f-1' }))?.props.label)).toMatch('Name the magic number')
+  await drawn.press({ key: 'replace' })
+  expect(String((await drawn.find({ key: 'f-1' }))?.props.label)).toMatch('From the new PR')
+  expect(await drawn.find({ key: 'replace' })).toBeUndefined()
+})
+
+test('Keep holds on to the current review and the new findings are not kept', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+  const drawn = await pane($)
+
+  await drawn.press({ key: 'keep' })
+  const late = await review($, { ...FINDING, title: 'Late one' })
+
+  expect(late.isError).toBe(false)
+  expect(await drawn.find({ key: 'keep' })).toBeUndefined()
+  expect((await drawn.findAll({ type: 'Button' })).map(b => String(b.props.label)).join(' ')).not.toMatch('Late one')
+})
+
+test('a review with no findings yet is replaced without asking', async ($, on) => {
+  world(on)
+  await startMine($)
+
+  await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+
+  const shown = await paneText($)
+  expect(shown).toMatch('acme/shop#7')
+  expect(shown).not.toMatch('Replace the review')
 })

@@ -9,6 +9,8 @@ import { findingLabel, statusTag } from './rows'
 /** What the list pane shows. */
 export type ListData = {
   review: Review | null
+  /** The PR of a review waiting for "replace or keep", when there is one. */
+  asking: string | null
   columns: number
 }
 
@@ -17,11 +19,13 @@ export type ListActions = {
   open: (n: number) => void | Promise<void>
   flipMode: () => void | Promise<void>
   submit: () => void | Promise<void>
+  replace: () => void | Promise<void>
+  keep: () => void | Promise<void>
 }
 
 /** Draws the review: the Standards and Spec sections, each sorted by score. */
 export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actions: ListActions) {
-  const { review, columns } = data
+  const { review, asking, columns } = data
   if (review === null) {
     return <Text dimColor>No review yet. Run the code-review skill.</Text>
   }
@@ -42,6 +46,17 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
           {open} open · {pending} pending · {done} done
         </Text>
       </Box>
+      {asking !== null && (
+        <Box key="ask-box" flexDirection="column" marginBottom={1} borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Text color="yellow">
+            Replace the review of {review.pr} with {asking}?
+          </Text>
+          <Box flexDirection="row" columnGap={1}>
+            <Button key="replace" label="Replace" variant="primary" onPress={actions.replace} />
+            <Button key="keep" label={`Keep ${review.pr}`} onPress={actions.keep} />
+          </Box>
+        </Box>
+      )}
       {review.mode === 'theirs' && pending > 0 && (
         <Box key="submit-box" marginBottom={1}>
           <Button key="submit" label={`${pending} pending · Submit review`} variant="primary" onPress={actions.submit} />
