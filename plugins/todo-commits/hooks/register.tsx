@@ -5,6 +5,8 @@ import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, To
 
 import { COMMIT_RULE, MAX_EARLIER, MAX_NEW_COMMITS, MAX_UNTRACKED, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
 import { splitDiff } from './diff'
+import { changeTodos } from './state'
+import type { Ports } from './state'
 import { cleanTitle, readVerdicts } from './model'
 import { earlierSummary, fit, progressBar, rowLook, toolRowLine } from './ui/rows'
 import type { ToolInput } from './ui/rows'
@@ -22,6 +24,33 @@ const dropped = atom({ plugin: 'todo-commits', key: 'dropped' } as const, [])
 
 type $ = EngineInterface
 
+/** The engine's calls the other modules use, built for one event (see Ports). */
+function ports($: $): Ports {
+  return {
+    run: argv => $.process.run(argv),
+    storeGet: async key => $.store.get(key),
+    storeSet: async (key, value) => $.store.set(key, value),
+    now: async () => $.clock.now(),
+    isPaneOpen: async () => (await $.ui.panes()).some(pane => pane.id === TODO_PANE),
+    openPane: async args => {
+      await $.ui.open({ id: TODO_PANE, ...args })
+    },
+    closePane: async () => {
+      await $.ui.close({ id: TODO_PANE })
+    },
+    complete: request => $.model.complete(request),
+    todos: { get: () => read($, todos), update: change => update($, todos, change) },
+    head: { get: () => read($, head), update: change => update($, head, change) },
+    lastActiveId: { get: () => read($, lastActiveId), update: change => update($, lastActiveId, change) },
+    commit: { get: () => read($, commit), update: change => update($, commit, change) },
+    place: { get: () => read($, place), update: change => update($, place, change) },
+    earlier: { get: () => read($, earlier), update: change => update($, earlier, change) },
+    isEarlierOpen: { get: () => read($, isEarlierOpen), update: change => update($, isEarlierOpen, change) },
+    frame: { get: () => read($, frame), update: change => update($, frame, change) },
+    dropped: { get: () => read($, dropped), update: change => update($, dropped, change) },
+  }
+}
+
 async function git($: $, args: string[]): Promise<string | undefined> {
   const ran = await $.process.run(['git', ...args])
 
@@ -34,15 +63,6 @@ async function readHead($: $): Promise<string> {
 
 async function isPaneOpen($: $): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === TODO_PANE)
-}
-
-/** Changes the list and saves it for this repo and branch. */
-async function changeTodos($: $, change: (list: Todo[]) => Todo[]) {
-  const list = await update($, todos, change)
-  const here = await read($, place)
-  if (here !== null) {
-    await $.store.set(`todos:${here.key}`, list)
-  }
 }
 
 async function readPlace($: $): Promise<Place | null> {
@@ -69,7 +89,7 @@ async function syncPlace($: $): Promise<boolean> {
   await update($, place, () => now)
   if (was === null && !Array.isArray(saved)) {
     // First look in this session with nothing saved yet: keep the list in hand.
-    await changeTodos($, list => list)
+    await changeTodos(ports($), list => list)
   } else {
     await update($, todos, () => (Array.isArray(saved) ? (saved as Todo[]) : []))
   }
@@ -143,7 +163,7 @@ async function openIfNew($: $, hadTodos: boolean) {
 }
 
 async function setStatus($: $, id: string, status: TodoStatus | 'deleted', title?: string) {
-  await changeTodos($, list => withStatus(list, id, status, title))
+  await changeTodos(ports($), list => withStatus(list, id, status, title))
   if (status === 'in_progress') {
     await update($, lastActiveId, () => id)
   }
@@ -167,7 +187,7 @@ async function linkNewCommits($: $): Promise<boolean> {
     return true
   }
 
-  await changeTodos($, current => linkCommits(current, target, hashes))
+  await changeTodos(ports($), current => linkCommits(current, target, hashes))
 
   return true
 }
@@ -315,7 +335,7 @@ async function runTodosTool($: $, input: TodosInput): Promise<TodosAnswer> {
       return { text: 'Nothing added: "titles" needs at least one title.', isError: true }
     }
     const stamp = await $.clock.now()
-    await changeTodos($, current => addTodos(current, titles, stamp))
+    await changeTodos(ports($), current => addTodos(current, titles, stamp))
 
     return { text: listText(await read($, todos)) }
   }
@@ -337,7 +357,7 @@ async function runTodosTool($: $, input: TodosInput): Promise<TodosAnswer> {
       : { text: `Done ${position}: ${picked.title} (${done} of ${now.length} done)` }
   }
   if (input.action === 'clear') {
-    await changeTodos($, () => [])
+    await changeTodos(ports($), () => [])
     await update($, lastActiveId, () => '')
 
     return { text: 'The todo list is empty.' }
@@ -416,7 +436,7 @@ export const register: Register = on => {
     // The row shows the typed words at once; the tidy title replaces them when it comes.
     const tidy = await tidyTitle($, title)
     if (added !== undefined && tidy !== undefined) {
-      await changeTodos($, list => renameTodo(list, added.id, tidy))
+      await changeTodos(ports($), list => renameTodo(list, added.id, tidy))
     }
 
     return { text: `Added todo ${count}: ${tidy ?? title}` }
@@ -453,7 +473,7 @@ export const register: Register = on => {
     }
     const hadTodos = (await read($, todos)).length > 0
     const { id, subject } = ran.result.task
-    await changeTodos($, list => [...list, { id, title: subject, status: 'pending' as const, commits: [] }])
+    await changeTodos(ports($), list => [...list, { id, title: subject, status: 'pending' as const, commits: [] }])
     await openIfNew($, hadTodos)
 
     return ran
@@ -468,7 +488,7 @@ export const register: Register = on => {
       await setStatus($, e.taskId, e.status, e.subject)
     } else if (e.subject !== undefined) {
       const subject = e.subject
-      await changeTodos($, list => renameTodo(list, e.taskId, subject))
+      await changeTodos(ports($), list => renameTodo(list, e.taskId, subject))
     }
 
     return ran
@@ -481,7 +501,7 @@ export const register: Register = on => {
     }
     const previous = await read($, todos)
     const nextList = fromTodoWrite(previous, e.todos)
-    await changeTodos($, () => nextList)
+    await changeTodos(ports($), () => nextList)
     const active = nextList.find(todo => todo.status === 'in_progress')
     if (active !== undefined) {
       await update($, lastActiveId, () => active.id)
