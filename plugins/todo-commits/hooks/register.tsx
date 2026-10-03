@@ -4,11 +4,11 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, Todo, TodoStatus } from '../types'
 
 import { COMMIT_RULE, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
-import { splitDiff } from './diff'
-import { missingCommits, newCommits, readCommit, readEarlier, readHead, readPlace, readWorking } from './git'
+import { missingCommits, newCommits, readEarlier, readHead, readPlace } from './git'
 import { changeTodos } from './state'
 import type { Ports } from './state'
-import { cleanTitle, readVerdicts } from './model'
+import { backToList, showCommit, showWorking, toggleFile } from './commit-view'
+import { tidyTitle } from './model'
 import { earlierSummary, fit, progressBar, rowLook, toolRowLine } from './ui/rows'
 import type { ToolInput } from './ui/rows'
 import { addTodos, fromTodoWrite, linkCommits, listText, pickTarget, progress, renameTodo, setStatus as withStatus } from './todo-list'
@@ -137,121 +137,6 @@ async function linkNewCommits($: $): Promise<boolean> {
   return true
 }
 
-/** Asks a small model whether each large file's diff is worth reading. */
-async function judgeLargeFiles($: $, message: string, files: CommitFile[]): Promise<Map<string, DiffVerdict>> {
-  const large = files.filter(file => file.isLarge)
-  const samples = large.map(file => {
-    const sample = file.pieces.map(piece => piece.text).join('\n').split('\n').slice(0, 40).join('\n')
-    return `FILE ${file.path} (+${file.added} -${file.removed})\n${sample.slice(0, 3000)}`
-  })
-  const asked = await $.model.complete({
-    model: 'haiku',
-    effort: 'low',
-    maxTokens: 800,
-    timeoutMs: 30000,
-    system:
-      'You help a developer review a git commit. For each large file diff, say whether it is worth reading by eye. ' +
-      'Generated or bulk changes (snapshot tests, lock files, minified or built files, fixtures, data dumps, ' +
-      'mass renames or formatting) are usually not. Hand-written logic usually is.',
-    prompt: [
-      `Commit message: ${message}`,
-      '',
-      ...samples,
-      '',
-      'Answer with JSON only: [{"path": "...", "isWorth": true|false, "reason": "one short plain sentence"}]',
-    ].join('\n'),
-  })
-
-  return asked.isAnswered ? readVerdicts(asked.text) : new Map<string, DiffVerdict>()
-}
-
-/** Shows a diff in the pane, folding large files and asking the model about them. */
-async function presentView($: $, view: CommitView, title: string) {
-  await update($, commit, () => view)
-  // Same pane as the list: Esc (or the pane's close mark) goes back, see the ui.close hook.
-  await openPane($, { title, closeOnEscape: true })
-
-  if (view.isChecking) {
-    const verdicts = await judgeLargeFiles($, view.message, view.files)
-    await update($, commit, current =>
-      current?.hash !== view.hash
-        ? current
-        : {
-            ...current,
-            isChecking: false,
-            files: current.files.map(file => {
-              const verdict = verdicts.get(file.path)
-              return verdict === undefined ? file : { ...file, verdict }
-            }),
-          },
-    )
-  }
-}
-
-async function showCommit($: $, hash: string) {
-  const { message, diff } = await readCommit(ports($), hash)
-  const files = message === undefined || diff === undefined ? [] : splitDiff(diff)
-  const view: CommitView = {
-    hash,
-    kind: 'commit',
-    message: message ?? 'This commit could not be read here. It may have been dropped and cleaned up by git.',
-    files,
-    isChecking: files.some(file => file.isLarge),
-  }
-  await presentView($, view, `Commit ${hash.slice(0, 7)}`)
-}
-
-/** Shows what is changed but not committed: tracked changes, then new files. */
-async function showWorking($: $) {
-  const { diff, extra } = await readWorking(ports($))
-  const files = splitDiff(diff)
-  const view: CommitView = {
-    hash: 'working',
-    kind: 'working',
-    message:
-      'Not committed yet: the changes for the todo in progress.' +
-      (extra > 0 ? ` ${extra} more new files not shown.` : ''),
-    files,
-    isChecking: files.some(file => file.isLarge),
-  }
-  await presentView($, view, 'Uncommitted')
-}
-
-async function backToList($: $) {
-  await update($, commit, () => null)
-  await openPane($, { title: 'Todos' })
-}
-
-/** Turns what the person typed into a short todo title; undefined when the model gives nothing usable. */
-async function tidyTitle($: $, typed: string): Promise<string | undefined> {
-  const asked = await $.model.complete({
-    model: 'haiku',
-    effort: 'low',
-    maxTokens: 60,
-    timeoutMs: 8000,
-    system:
-      'Rewrite what the user typed as one short todo title. Start with a verb. At most 50 characters. ' +
-      'Keep any names, file names and numbers they wrote. Reply with the title only.',
-    prompt: typed,
-  })
-  if (!asked.isAnswered) {
-    return undefined
-  }
-
-  return cleanTitle(asked.text)
-}
-
-async function toggleFile($: $, hash: string, path: string) {
-  await update($, commit, current =>
-    current?.hash !== hash
-      ? current
-      : {
-          ...current,
-          files: current.files.map(file => (file.path === path ? { ...file, isOpen: !file.isOpen } : file)),
-        },
-  )
-}
-
 type TodosInput = ToolInput
 
 type TodosAnswer = { text: string; isError?: true }
@@ -372,7 +257,7 @@ export const register: Register = on => {
     const added = (await read($, todos)).at(-1)
     const count = (await read($, todos)).length
     // The row shows the typed words at once; the tidy title replaces them when it comes.
-    const tidy = await tidyTitle($, title)
+    const tidy = await tidyTitle(ports($), title)
     if (added !== undefined && tidy !== undefined) {
       await changeTodos(ports($), list => renameTodo(list, added.id, tidy))
     }
@@ -386,7 +271,7 @@ export const register: Register = on => {
     }
     // Esc or the close mark on a commit goes back to the list instead of closing.
     if (e.origin.kind === 'person' && (await read($, commit)) !== null) {
-      await backToList($)
+      await backToList(ports($))
       return { value: undefined }
     }
     await update($, commit, () => null)
@@ -513,7 +398,7 @@ export const register: Register = on => {
               <Text> </Text>
               <Text color="red">−{removed}</Text>
             </Box>
-            <Button key="back" label="← Back to todos" onPress={() => backToList($)} />
+            <Button key="back" label="← Back to todos" onPress={() => backToList(ports($))} />
           </Box>
           <Box marginY={1}>
             <Text>{view.message}</Text>
@@ -541,7 +426,7 @@ export const register: Register = on => {
                   <Button
                     key={`t-${file.path}`}
                     label={file.isOpen ? 'Hide diff' : 'Show diff'}
-                    onPress={() => toggleFile($, view.hash, file.path)}
+                    onPress={() => toggleFile(ports($), view.hash, file.path)}
                   />
                 </Box>
               )}
@@ -611,7 +496,7 @@ export const register: Register = on => {
                 plain
                 hotkey={look.hotkey}
                 hover={{ color: 'cyan' }}
-                onPress={() => (opens.kind === 'working' ? showWorking($) : showCommit($, opens.hash))}
+                onPress={() => (opens.kind === 'working' ? showWorking(ports($)) : showCommit(ports($), opens.hash))}
               />
             )
 
@@ -645,7 +530,7 @@ export const register: Register = on => {
                         label={hash.slice(0, 7)}
                         plain
                         hover={{ color: 'cyan' }}
-                        onPress={() => showCommit($, hash)}
+                        onPress={() => showCommit(ports($), hash)}
                       />
                     </Box>
                   ))}
@@ -675,7 +560,7 @@ export const register: Register = on => {
                     label={`  ${c.hash.slice(0, 7)}  ${fit(c.subject, Math.max(8, columns - 12))}`}
                     plain
                     hover={{ color: 'cyan' }}
-                    onPress={() => showCommit($, c.hash)}
+                    onPress={() => showCommit(ports($), c.hash)}
                   />
                 </Box>
               ))}
