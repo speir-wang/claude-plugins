@@ -1,18 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import { COMMIT_RULE, SPINNER, SPIN_MS, TODO_PANE, TOOL } from './config'
-import { changeTodos, setStatus } from './state'
-import type { Ports } from './state'
+import type { TodosInput } from '../types'
+
 import { backToList, showCommit, showWorking, toggleFile } from './commit-view'
-import { COMMAND, TOOL as TOOL_DEF, runCommand, runTool } from './todo-tool'
-import { afterBash, beforeTodosOpen, linkNewCommits, syncPlace } from './sync'
+import { COMMIT_RULE, SPINNER, SPIN_MS, TODO_PANE, TOOL } from './config'
+import { changeStatus, changeTodos } from './ports'
+import type { Ports } from './ports'
+import { afterBash, syncPlace } from './sync'
+import { fromTodoWrite, renameTodo } from './todo-list'
+import { COMMAND_SPEC, TOOL_SPEC, runCommand, runTool } from './todo-tool'
 import { drawCommitPane } from './ui/commit-pane'
 import { drawListPane } from './ui/list-pane'
 import { toolRowLine } from './ui/rows'
 import { drawEmptyResult, drawToolRow } from './ui/tool-row'
-import type { ToolInput } from './ui/rows'
-import { fromTodoWrite, renameTodo } from './todo-list'
 
 const todos = atom({ plugin: 'todo-commits', key: 'todos' } as const, [])
 const head = atom({ plugin: 'todo-commits', key: 'head' } as const, '')
@@ -47,25 +48,14 @@ function ports($: $): Ports {
     commit: { get: () => read($, commit), update: change => update($, commit, change) },
     place: { get: () => read($, place), update: change => update($, place, change) },
     earlier: { get: () => read($, earlier), update: change => update($, earlier, change) },
-    isEarlierOpen: { get: () => read($, isEarlierOpen), update: change => update($, isEarlierOpen, change) },
-    frame: { get: () => read($, frame), update: change => update($, frame, change) },
     dropped: { get: () => read($, dropped), update: change => update($, dropped, change) },
   }
 }
 
-async function isPaneOpen($: $): Promise<boolean> {
-  return (await $.ui.panes()).some(pane => pane.id === TODO_PANE)
-}
-
-/** Opens (or retitles) the todo pane. */
-async function openPane($: $, args: { title: string; closeOnEscape?: true }) {
-  await $.ui.open({ id: TODO_PANE, ...args })
-}
-
 /** Opens the todo pane the first time Claude makes a list. */
-async function openIfNew($: $, hadTodos: boolean) {
-  if (!hadTodos && !(await isPaneOpen($))) {
-    await openPane($, { title: 'Todos' })
+async function openIfNew(p: Pick<Ports, 'isPaneOpen' | 'openPane'>, hadTodos: boolean) {
+  if (!hadTodos && !(await p.isPaneOpen())) {
+    await p.openPane({ title: 'Todos' })
   }
 }
 
@@ -74,8 +64,8 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.command.register(COMMAND)
-    await $.tool.register(TOOL_DEF)
+    await $.command.register(COMMAND_SPEC)
+    await $.tool.register(TOOL_SPEC)
     await syncPlace(ports($))
     spinner?.cancel()
     spinner = $.clock.every(SPIN_MS, () => {
@@ -107,11 +97,13 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The loader reads hook filters from this file only: keep this name written out, not TOOL from config.
   on('tool.call', { tool: 'mcp__todo-commits__todos' }, async ($, e) => {
-    const answer = await runTool(ports($), e as ToolInput)
+    const p = ports($)
+    const answer = await runTool(p, e as TodosInput)
     // Claude is changing the list: show it, so its one-line rows never stand alone.
-    if (!(await isPaneOpen($))) {
-      await openPane($, { title: 'Todos' })
+    if (!(await p.isPaneOpen())) {
+      await p.openPane({ title: 'Todos' })
     }
 
     return answer.isError ? { result: answer.text, isError: true as const } : { result: answer.text }
@@ -122,10 +114,11 @@ export const register: Register = on => {
     if (ran.result === undefined || ran.isError) {
       return ran
     }
-    const hadTodos = (await read($, todos)).length > 0
+    const p = ports($)
+    const hadTodos = (await p.todos.get()).length > 0
     const { id, subject } = ran.result.task
-    await changeTodos(ports($), list => [...list, { id, title: subject, status: 'pending' as const, commits: [] }])
-    await openIfNew($, hadTodos)
+    await changeTodos(p, list => [...list, { id, title: subject, status: 'pending' as const, commits: [] }])
+    await openIfNew(p, hadTodos)
 
     return ran
   })
@@ -135,11 +128,12 @@ export const register: Register = on => {
     if (ran.result === undefined || ran.isError) {
       return ran
     }
+    const p = ports($)
     if (e.status !== undefined) {
-      await setStatus(ports($), e.taskId, e.status, e.subject)
+      await changeStatus(p, e.taskId, e.status, e.subject)
     } else if (e.subject !== undefined) {
       const subject = e.subject
-      await changeTodos(ports($), list => renameTodo(list, e.taskId, subject))
+      await changeTodos(p, list => renameTodo(list, e.taskId, subject))
     }
 
     return ran
@@ -150,14 +144,15 @@ export const register: Register = on => {
     if (ran.result === undefined || ran.isError) {
       return ran
     }
-    const previous = await read($, todos)
+    const p = ports($)
+    const previous = await p.todos.get()
     const nextList = fromTodoWrite(previous, e.todos)
-    await changeTodos(ports($), () => nextList)
+    await changeTodos(p, () => nextList)
     const active = nextList.find(todo => todo.status === 'in_progress')
     if (active !== undefined) {
-      await update($, lastActiveId, () => active.id)
+      await p.lastActiveId.update(() => active.id)
     }
-    await openIfNew($, previous.length > 0)
+    await openIfNew(p, previous.length > 0)
 
     return ran
   })
@@ -171,7 +166,7 @@ export const register: Register = on => {
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
-    if (!(await isPaneOpen($))) {
+    if (!(await ports($).isPaneOpen())) {
       return composed
     }
 
@@ -183,6 +178,7 @@ export const register: Register = on => {
     }
   })
 
+  // Written out for the loader, like the tool name above: this is TODO_PANE.
   on('ui.render', { component: 'Pane', requestId: 'todo-commits' }, async ($, e) => {
     const parts = $.ui.resolve(e)
     const view = await read($, commit)
@@ -223,7 +219,7 @@ export const register: Register = on => {
       return next(e)
     }
 
-    return drawToolRow($.ui.resolve(e), toolRowLine((input ?? {}) as ToolInput, await read($, todos)))
+    return drawToolRow($.ui.resolve(e), toolRowLine((input ?? {}) as TodosInput, await read($, todos)))
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {

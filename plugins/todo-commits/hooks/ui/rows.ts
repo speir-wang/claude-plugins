@@ -1,4 +1,4 @@
-import type { Earlier, EarlierCommit, Todo } from '../../types'
+import type { Earlier, EarlierCommit, Todo, TodosInput } from '../../types'
 
 /** What a press on a todo row opens. */
 export type RowOpens = { kind: 'commit'; hash: string } | { kind: 'working' } | null
@@ -18,9 +18,6 @@ export type RowLook = {
   tag: RowTag | null
   opens: RowOpens
 }
-
-/** The input of the todos tool, as the tool row reads it. */
-export type ToolInput = { action?: unknown; titles?: unknown; number?: unknown }
 
 /** Cuts or pads text to exactly `width` cells (one cell per character). */
 export function fit(text: string, width: number): string {
@@ -81,7 +78,7 @@ export function earlierSummary(
 }
 
 /** The icon, color and text of the one-line tool row. */
-export function toolRowLine(input: ToolInput, list: Todo[]): { icon: string; color: 'yellow' | 'green' | undefined; text: string } {
+export function toolRowLine(input: TodosInput, list: Todo[]): { icon: string; color: 'yellow' | 'green' | undefined; text: string } {
   const { action, titles, number } = input
   const todo = typeof number === 'number' ? list[number - 1] : undefined
   const names = Array.isArray(titles) ? titles.filter((t): t is string => typeof t === 'string') : []

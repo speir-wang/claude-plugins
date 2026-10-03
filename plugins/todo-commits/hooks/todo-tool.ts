@@ -1,20 +1,22 @@
+import type { TodosInput } from '../types'
+
 import { TOOL_NAME } from './config'
 import { tidyTitle } from './model'
-import { changeTodos, setStatus } from './state'
-import type { Ports } from './state'
+import { changeStatus, changeTodos } from './ports'
+import type { Ports } from './ports'
 import { linkNewCommits, beforeTodosOpen } from './sync'
+import type { SyncPorts } from './sync'
 import { addTodos, listText, progress, renameTodo } from './todo-list'
-import type { ToolInput } from './ui/rows'
 
 /** The /todos command, as it is registered. */
-export const COMMAND = {
+export const COMMAND_SPEC = {
   name: 'todos',
   description: 'Show or hide the todo panel; "/todos add <text>" adds a todo, "/todos clear" empties the list',
   argumentHint: '[add <text> | clear]',
 }
 
 /** The todos tool, as it is registered. */
-export const TOOL = {
+export const TOOL_SPEC = {
   name: TOOL_NAME,
   description:
     "The user's todo panel. \"add\" appends steps as not started (titles). " +
@@ -33,11 +35,17 @@ export const TOOL = {
 
 type TodosAnswer = { text: string; isError?: true }
 
+/** What running the tool needs. */
+type ToolPorts = SyncPorts & Pick<Ports, 'now'>
+
+/** What running the command needs. */
+type CommandPorts = ToolPorts & Pick<Ports, 'isPaneOpen' | 'openPane' | 'closePane' | 'complete'>
+
 /**
  * Serves the mod's own todo tool. "add" answers with the whole numbered list,
  * so the model learns the numbers; the rest answer in one line.
  */
-export async function runTool(p: Ports, input: ToolInput): Promise<TodosAnswer> {
+export async function runTool(p: ToolPorts, input: TodosInput): Promise<TodosAnswer> {
   const list = await p.todos.get()
   const position = typeof input.number === 'number' ? input.number : NaN
   const picked = list[position - 1]
@@ -62,7 +70,7 @@ export async function runTool(p: Ports, input: ToolInput): Promise<TodosAnswer> 
       // A commit made just before "done" still belongs to this todo.
       await linkNewCommits(p)
     }
-    await setStatus(p, picked.id, input.action === 'start' ? 'in_progress' : 'completed')
+    await changeStatus(p, picked.id, input.action === 'start' ? 'in_progress' : 'completed')
     await p.lastActiveId.update(() => picked.id)
     const now = await p.todos.get()
     const { done } = progress(now)
@@ -82,7 +90,7 @@ export async function runTool(p: Ports, input: ToolInput): Promise<TodosAnswer> 
 }
 
 /** Runs "/todos [add <text> | clear]" and answers with the reply text. */
-export async function runCommand(p: Ports, args: string): Promise<string> {
+export async function runCommand(p: CommandPorts, args: string): Promise<string> {
   // Plain "/todos" toggles; "add" and "clear" always leave the pane open.
   if (args.trim() === '' && (await p.isPaneOpen())) {
     await p.closePane()

@@ -1,12 +1,19 @@
 import type { Todo } from '../types'
 
 import { missingCommits, newCommits, readEarlier, readHead, readPlace } from './git'
-import { changeTodos } from './state'
-import type { Ports } from './state'
+import { changeTodos } from './ports'
+import type { Ports, SavePorts } from './ports'
 import { linkCommits, pickTarget } from './todo-list'
 
+type BranchInfoPorts = Pick<Ports, 'run' | 'place' | 'todos' | 'earlier' | 'dropped'>
+
+type LinkPorts = SavePorts & Pick<Ports, 'run' | 'head' | 'lastActiveId'>
+
+/** What following the branch needs. */
+export type SyncPorts = BranchInfoPorts & LinkPorts & Pick<Ports, 'storeGet'>
+
 /** Refreshes the earlier section and the dropped commits: the one step run when git moved. */
-export async function refreshBranchInfo(p: Ports) {
+export async function refreshBranchInfo(p: BranchInfoPorts) {
   const here = await p.place.get()
   const found = await readEarlier(p, here?.branch)
   await p.earlier.update(() => found)
@@ -20,7 +27,7 @@ export async function refreshBranchInfo(p: Ports) {
  * and refreshes the branch info. Answers true when the place changed, so
  * HEAD's move is not read as new commits.
  */
-export async function syncPlace(p: Ports): Promise<boolean> {
+export async function syncPlace(p: SyncPorts): Promise<boolean> {
   const now = await readPlace(p)
   const was = await p.place.get()
   if (now?.key === was?.key) {
@@ -43,7 +50,7 @@ export async function syncPlace(p: Ports): Promise<boolean> {
 }
 
 /** Gives every commit made since the last look to the active todo; true when HEAD moved. */
-export async function linkNewCommits(p: Ports): Promise<boolean> {
+export async function linkNewCommits(p: LinkPorts): Promise<boolean> {
   const before = await p.head.get()
   const after = await readHead(p)
   if (after === '' || after === before) {
@@ -62,14 +69,14 @@ export async function linkNewCommits(p: Ports): Promise<boolean> {
 }
 
 /** After a Bash call: follow the branch, link new commits, and refresh when HEAD moved. */
-export async function afterBash(p: Ports) {
+export async function afterBash(p: SyncPorts) {
   if (!(await syncPlace(p)) && (await linkNewCommits(p))) {
     await refreshBranchInfo(p)
   }
 }
 
 /** Before /todos opens: follow the branch, and refresh unless following already did. */
-export async function beforeTodosOpen(p: Ports) {
+export async function beforeTodosOpen(p: SyncPorts) {
   if (!(await syncPlace(p))) {
     await refreshBranchInfo(p)
   }

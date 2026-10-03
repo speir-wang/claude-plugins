@@ -48,6 +48,9 @@ export type EarlierCommit = { hash: string; subject: string }
 /** The branch's own commits since it split from the main branch. */
 export type Earlier = { base: string; total: number; commits: EarlierCommit[] }
 
+/** The todos tool's input, unchecked: the model may send anything. */
+export type TodosInput = { action?: unknown; titles?: unknown; number?: unknown }
+
 declare module 'claude-code' {
   interface PluginState {
     'todo-commits': {

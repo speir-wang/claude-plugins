@@ -3,10 +3,13 @@ import type { CommitView } from '../types'
 import { splitDiff } from './diff'
 import { readCommit, readWorking } from './git'
 import { judgeLargeFiles } from './model'
-import type { Ports } from './state'
+import type { Ports } from './ports'
+
+/** What showing a view needs. */
+type ViewPorts = Pick<Ports, 'run' | 'commit' | 'openPane' | 'complete'>
 
 /** Shows a diff in the pane, folding large files and asking the model about them. */
-async function presentView(p: Ports, view: CommitView, title: string) {
+async function presentView(p: ViewPorts, view: CommitView, title: string) {
   await p.commit.update(() => view)
   // Same pane as the list: Esc (or the pane's close mark) goes back, see the ui.close hook.
   await p.openPane({ title, closeOnEscape: true })
@@ -29,7 +32,7 @@ async function presentView(p: Ports, view: CommitView, title: string) {
 }
 
 /** Shows one commit's message and diff. */
-export async function showCommit(p: Ports, hash: string) {
+export async function showCommit(p: ViewPorts, hash: string) {
   const { message, diff } = await readCommit(p, hash)
   const files = message === undefined || diff === undefined ? [] : splitDiff(diff)
   const view: CommitView = {
@@ -43,7 +46,7 @@ export async function showCommit(p: Ports, hash: string) {
 }
 
 /** Shows what is changed but not committed: tracked changes, then new files. */
-export async function showWorking(p: Ports) {
+export async function showWorking(p: ViewPorts) {
   const { diff, extra } = await readWorking(p)
   const files = splitDiff(diff)
   const view: CommitView = {
@@ -59,7 +62,7 @@ export async function showWorking(p: Ports) {
 }
 
 /** Folds or unfolds one file of the view that is showing. */
-export async function toggleFile(p: Ports, hash: string, path: string) {
+export async function toggleFile(p: Pick<Ports, 'commit'>, hash: string, path: string) {
   await p.commit.update(current =>
     current?.hash !== hash
       ? current
@@ -71,7 +74,7 @@ export async function toggleFile(p: Ports, hash: string, path: string) {
 }
 
 /** Leaves the commit view and shows the list again. */
-export async function backToList(p: Ports) {
+export async function backToList(p: Pick<Ports, 'commit' | 'openPane'>) {
   await p.commit.update(() => null)
   await p.openPane({ title: 'Todos' })
 }

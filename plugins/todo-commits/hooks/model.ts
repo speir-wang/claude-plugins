@@ -1,6 +1,6 @@
 import type { CommitFile, DiffVerdict } from '../types'
 
-import type { Ports } from './state'
+import type { Ports } from './ports'
 
 /** Reads the model's answer about large files: path to verdict. Bad replies give an empty map. */
 export function readVerdicts(reply: string): Map<string, DiffVerdict> {

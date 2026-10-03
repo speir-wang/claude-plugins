@@ -1,7 +1,7 @@
 import type { Earlier, Place } from '../types'
 
 import { MAX_EARLIER, MAX_NEW_COMMITS, MAX_UNTRACKED } from './config'
-import type { Ports } from './state'
+import type { Ports } from './ports'
 
 type Run = Pick<Ports, 'run'>
 

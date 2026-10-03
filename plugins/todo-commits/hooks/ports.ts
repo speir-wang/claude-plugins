@@ -2,7 +2,7 @@ import type { ModelCompleteRequest, ModelCompleteResult } from 'claude-code'
 
 import type { CommitView, Earlier, Place, Todo, TodoStatus } from '../types'
 
-import { setStatus as withStatus } from './todo-list'
+import { setStatus } from './todo-list'
 
 /** One value the plugin keeps in `$.state`, read and changed through two small calls. */
 export type Cell<T> = {
@@ -12,9 +12,9 @@ export type Cell<T> = {
 }
 
 /**
- * Everything the other modules may use from the engine, as plain calls.
+ * The engine's calls the other modules may use, as plain calls.
  * The engine only follows `$` inside the entry file, so the entry file builds
- * this once per event and hands it on.
+ * this and hands it on. Each module asks only for the members it uses.
  */
 export type Ports = {
   run: (argv: string[]) => Promise<{ exitCode: number; stdout: string }>
@@ -31,13 +31,14 @@ export type Ports = {
   commit: Cell<CommitView | null>
   place: Cell<Place | null>
   earlier: Cell<Earlier | null>
-  isEarlierOpen: Cell<boolean>
-  frame: Cell<number>
   dropped: Cell<string[]>
 }
 
+/** What saving the list needs. */
+export type SavePorts = Pick<Ports, 'todos' | 'place' | 'storeSet'>
+
 /** Changes the list and saves it for this repo and branch. */
-export async function changeTodos(p: Ports, change: (list: Todo[]) => Todo[]) {
+export async function changeTodos(p: SavePorts, change: (list: Todo[]) => Todo[]) {
   const list = await p.todos.update(change)
   const here = await p.place.get()
   if (here !== null) {
@@ -45,9 +46,14 @@ export async function changeTodos(p: Ports, change: (list: Todo[]) => Todo[]) {
   }
 }
 
-/** Sets a todo's status (and title); the one that starts becomes the last active one. */
-export async function setStatus(p: Ports, id: string, status: TodoStatus | 'deleted', title?: string) {
-  await changeTodos(p, list => withStatus(list, id, status, title))
+/** Sets a todo's status (and title) and saves; the one that starts becomes the last active one. */
+export async function changeStatus(
+  p: SavePorts & Pick<Ports, 'lastActiveId'>,
+  id: string,
+  status: TodoStatus | 'deleted',
+  title?: string,
+) {
+  await changeTodos(p, list => setStatus(list, id, status, title))
   if (status === 'in_progress') {
     await p.lastActiveId.update(() => id)
   }
