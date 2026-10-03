@@ -1,8 +1,11 @@
 {
   "name": "todo-commits",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A todo panel for Claude Code: each todo links to its commit, and a click shows the message and diff",
-  "author": { "name": "He Wang", "url": "https://github.com/speir-wang" },
+  "author": {
+    "name": "He Wang",
+    "url": "https://github.com/speir-wang"
+  },
   "homepage": "https://github.com/speir-wang/claude-plugins/tree/main/plugins/todo-commits",
   "repository": "https://github.com/speir-wang/claude-plugins",
   "types": "./types/index.d.ts"
