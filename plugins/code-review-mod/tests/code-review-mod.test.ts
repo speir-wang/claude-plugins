@@ -292,3 +292,14 @@ test('the top row shows the PR, whose it is and the counts; the tip fits the mod
   expect(theirs).toMatch('Submit')
   expect(theirs).toMatch('one review per session')
 })
+
+test('the mode switch in the panel flips between your PR and their PR', async ($, on) => {
+  world(on)
+  await startMine($)
+  const drawn = await pane($)
+
+  await drawn.press({ key: 'mode' })
+  expect(String((await drawn.find({ key: 'mode' }))?.props.label)).toMatch('their PR')
+  await drawn.press({ key: 'mode' })
+  expect(String((await drawn.find({ key: 'mode' }))?.props.label)).toMatch('your PR')
+})

@@ -15,6 +15,7 @@ export type ListData = {
 /** What the buttons in the list pane do. */
 export type ListActions = {
   open: (n: number) => void | Promise<void>
+  flipMode: () => void | Promise<void>
 }
 
 /** Draws the review: the Standards and Spec sections, each sorted by score. */
@@ -32,7 +33,10 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
     <Box flexDirection="column">
       <Box flexDirection="row" marginBottom={1}>
         <Text color="cyan">{review.pr}  </Text>
-        <Text>{review.mode === 'mine' ? 'your PR' : 'their PR'}  </Text>
+        <Box key="mode-box">
+          <Button key="mode" label={`${review.mode === 'mine' ? 'your PR' : 'their PR'} ⇄`} plain hover={{ color: 'cyan' }} onPress={actions.flipMode} />
+        </Box>
+        <Text>  </Text>
         <Text dimColor>
           {open} open · {pending} pending · {done} done
         </Text>

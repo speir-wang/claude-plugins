@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ReviewInput } from '../types'
 
-import { backToList, openFinding } from './actions'
+import { backToList, openFinding, switchMode } from './actions'
 import { PANE, PANE_TITLE, RULE, TOOL } from './config'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
@@ -104,7 +104,7 @@ export const register: Register = on => {
       return drawFindingPane(parts, finding, columns, { back: () => backToList(ports($)) })
     }
 
-    return drawListPane(parts, { review: current, columns }, { open: n => openFinding(ports($), n) })
+    return drawListPane(parts, { review: current, columns }, { open: n => openFinding(ports($), n), flipMode: () => switchMode(ports($)) })
   })
 
   // The review tool's calls draw as one line; the panel shows the review itself.

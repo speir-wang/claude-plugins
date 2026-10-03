@@ -1,3 +1,4 @@
+import { flipMode } from './mode'
 import type { Ports } from './ports'
 
 type ViewPorts = Pick<Ports, 'view' | 'openPane'>
@@ -12,4 +13,9 @@ export async function openFinding(p: ViewPorts, n: number) {
 export async function backToList(p: ViewPorts) {
   await p.view.update(() => ({ kind: 'list' }))
   await p.openPane()
+}
+
+/** Flips the review between your PR and their PR. */
+export async function switchMode(p: Pick<Ports, 'review'>) {
+  await p.review.update(review => (review === null ? review : { ...review, mode: flipMode(review.mode) }))
 }
