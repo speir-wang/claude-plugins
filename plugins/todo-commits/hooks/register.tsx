@@ -3,8 +3,9 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, Todo, TodoStatus } from '../types'
 
-import { COMMIT_RULE, MAX_EARLIER, MAX_NEW_COMMITS, MAX_UNTRACKED, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
+import { COMMIT_RULE, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
 import { splitDiff } from './diff'
+import { missingCommits, newCommits, readCommit, readEarlier, readHead, readPlace, readWorking } from './git'
 import { changeTodos } from './state'
 import type { Ports } from './state'
 import { cleanTitle, readVerdicts } from './model'
@@ -51,28 +52,8 @@ function ports($: $): Ports {
   }
 }
 
-async function git($: $, args: string[]): Promise<string | undefined> {
-  const ran = await $.process.run(['git', ...args])
-
-  return ran.exitCode === 0 ? ran.stdout : undefined
-}
-
-async function readHead($: $): Promise<string> {
-  return (await git($, ['rev-parse', 'HEAD']))?.trim() ?? ''
-}
-
 async function isPaneOpen($: $): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === TODO_PANE)
-}
-
-async function readPlace($: $): Promise<Place | null> {
-  const top = (await git($, ['rev-parse', '--show-toplevel']))?.trim()
-  const branch = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD']))?.trim()
-  if (top === undefined || branch === undefined) {
-    return null
-  }
-
-  return { key: `${top}#${branch}`, branch }
 }
 
 /**
@@ -80,7 +61,7 @@ async function readPlace($: $): Promise<Place | null> {
  * Answers true when the place changed, so HEAD's move is not read as new commits.
  */
 async function syncPlace($: $): Promise<boolean> {
-  const now = await readPlace($)
+  const now = await readPlace(ports($))
   const was = await read($, place)
   if (now?.key === was?.key) {
     return false
@@ -94,7 +75,7 @@ async function syncPlace($: $): Promise<boolean> {
     await update($, todos, () => (Array.isArray(saved) ? (saved as Todo[]) : []))
   }
   await update($, lastActiveId, () => '')
-  const at = await readHead($)
+  const at = await readHead(ports($))
   await update($, head, () => at)
   await refreshEarlier($)
   await refreshDropped($)
@@ -102,56 +83,22 @@ async function syncPlace($: $): Promise<boolean> {
   return true
 }
 
-/** The main branch to compare against: origin's default, else main or master. */
-async function findBase($: $): Promise<string | undefined> {
-  const remote = (await git($, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']))?.trim()
-  if (remote) {
-    return remote
-  }
-  for (const name of ['main', 'master']) {
-    if ((await git($, ['rev-parse', '--verify', '--quiet', name])) !== undefined) {
-      return name
-    }
-  }
-
-  return undefined
-}
-
-async function refreshEarlier($: $) {
-  const here = await read($, place)
-  const base = await findBase($)
-  if (here === null || base === undefined || base.replace(/^origin\//, '') === here.branch) {
-    await update($, earlier, () => null)
-    return
-  }
-  const total = Number((await git($, ['rev-list', '--count', `${base}..HEAD`]))?.trim() ?? 0)
-  const log = (await git($, ['log', '--format=%H%x1f%s', `--max-count=${MAX_EARLIER}`, `${base}..HEAD`])) ?? ''
-  const commits = log
-    .split('\n')
-    .filter(Boolean)
-    .map(line => {
-      const [hash = '', subject = ''] = line.split('\x1f')
-      return { hash, subject }
-    })
-  const found: Earlier | null = total > 0 ? { base, total, commits } : null
-  await update($, earlier, () => found)
-}
-
 /** Opens (or retitles) the todo pane. */
 async function openPane($: $, args: { title: string; closeOnEscape?: true }) {
   await $.ui.open({ id: TODO_PANE, ...args })
 }
 
+/** Reads the earlier section for this branch. */
+async function refreshEarlier($: $) {
+  const here = await read($, place)
+  const found = await readEarlier(ports($), here?.branch)
+  await update($, earlier, () => found)
+}
+
 /** Notes which linked commits are no longer on the branch. */
 async function refreshDropped($: $) {
   const hashes = (await read($, todos)).flatMap(todo => todo.commits)
-  const gone: string[] = []
-  for (const hash of hashes) {
-    const ran = await $.process.run(['git', 'merge-base', '--is-ancestor', hash, 'HEAD'])
-    if (ran.exitCode !== 0) {
-      gone.push(hash)
-    }
-  }
+  const gone = await missingCommits(ports($), hashes)
   await update($, dropped, () => gone)
 }
 
@@ -172,15 +119,13 @@ async function setStatus($: $, id: string, status: TodoStatus | 'deleted', title
 /** Gives every commit made since the last look to the active todo; true when HEAD moved. */
 async function linkNewCommits($: $): Promise<boolean> {
   const before = await read($, head)
-  const after = await readHead($)
+  const after = await readHead(ports($))
   if (after === '' || after === before) {
     return false
   }
   await update($, head, () => after)
 
-  const range = before === '' ? [after] : [`${before}..${after}`]
-  const listed = await git($, ['rev-list', '--reverse', `--max-count=${MAX_NEW_COMMITS}`, ...range])
-  const hashes = (listed ?? after).split('\n').filter(Boolean)
+  const hashes = await newCommits(ports($), before, after)
   const list = await read($, todos)
   const target = pickTarget(list, await read($, lastActiveId))
   if (target === '' || hashes.length === 0) {
@@ -244,8 +189,7 @@ async function presentView($: $, view: CommitView, title: string) {
 }
 
 async function showCommit($: $, hash: string) {
-  const message = (await git($, ['log', '-1', '--format=%B', hash]))?.trim()
-  const diff = await git($, ['show', '--format=', '--no-color', '--no-ext-diff', hash])
+  const { message, diff } = await readCommit(ports($), hash)
   const files = message === undefined || diff === undefined ? [] : splitDiff(diff)
   const view: CommitView = {
     hash,
@@ -259,14 +203,8 @@ async function showCommit($: $, hash: string) {
 
 /** Shows what is changed but not committed: tracked changes, then new files. */
 async function showWorking($: $) {
-  let diff = (await git($, ['diff', 'HEAD', '--no-color', '--no-ext-diff'])) ?? ''
-  const untracked = ((await git($, ['ls-files', '--others', '--exclude-standard'])) ?? '').split('\n').filter(Boolean)
-  for (const path of untracked.slice(0, MAX_UNTRACKED)) {
-    // Exits 1 whenever the file differs from nothing, so read stdout whatever the code.
-    diff += (await $.process.run(['git', 'diff', '--no-color', '--no-index', '--', '/dev/null', path])).stdout
-  }
+  const { diff, extra } = await readWorking(ports($))
   const files = splitDiff(diff)
-  const extra = untracked.length - MAX_UNTRACKED
   const view: CommitView = {
     hash: 'working',
     kind: 'working',
