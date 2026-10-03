@@ -271,3 +271,24 @@ test('a finding with no suggested code says so', async ($, on) => {
   expect((await drawn.findAll({ type: 'Code' })).length).toBe(1)
   expect((await drawn.findAll({ type: 'Text' })).map(t => t.text)).toContain('No code change suggested.')
 })
+
+test('the top row shows the PR, whose it is and the counts; the tip fits the mode', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { ...FINDING, title: 'Second' })
+
+  const mine = await paneText($)
+  expect(mine).toMatch('feature')
+  expect(mine).toMatch('your PR')
+  expect(mine).toMatch('2 open · 0 pending · 0 done')
+  expect(mine).toMatch('"fix 3"')
+  expect(mine).toMatch('one review per session')
+
+  await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+  const theirs = await paneText($)
+  expect(theirs).toMatch('acme/shop#7')
+  expect(theirs).toMatch('their PR')
+  expect(theirs).toMatch('Submit')
+  expect(theirs).toMatch('one review per session')
+})

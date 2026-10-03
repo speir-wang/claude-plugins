@@ -13,6 +13,12 @@ export const TODO_TOOL = 'mcp__todo-commits__todos'
 /** Saved reviews older than this are deleted when a session starts. */
 export const KEEP_MS = 7 * 24 * 60 * 60 * 1000
 
+/** The one-line tip at the bottom of the panel, by mode. */
+export const TIPS = {
+  mine: 'Tip: "fix 3" or press a row · "re-check" after fixing · one review per session',
+  theirs: 'Tip: press a row to add its comment · Submit posts them as one review · one review per session',
+} as const
+
 export const SCORE_SCALE = '9-10 a bug or a broken spec; 6-8 fix before merging; 3-5 nice to have; 1-2 nitpick'
 
 export const RULE = [

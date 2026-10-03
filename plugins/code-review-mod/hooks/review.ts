@@ -65,3 +65,10 @@ export function changeFinding(review: Review, n: number, change: (finding: Findi
 export function setStatus(review: Review, n: number, status: FindingStatus): Review {
   return changeFinding(review, n, f => ({ ...f, status }))
 }
+
+/** How many findings are open, pending (being fixed, or waiting to be posted) and done. */
+export function counts(review: Review): { open: number; pending: number; done: number } {
+  const is = (...statuses: FindingStatus[]) => review.findings.filter(f => statuses.includes(f.status)).length
+
+  return { open: is('open'), pending: is('fixing', 'pending'), done: is('fixed', 'wontfix', 'posted', 'dropped') }
+}

@@ -1,6 +1,8 @@
 import type { Review } from '../../types'
 
+import { TIPS } from '../config'
 import { groupFindings } from '../order'
+import { counts } from '../review'
 import type { Parts } from './parts'
 import { findingLabel } from './rows'
 
@@ -22,11 +24,19 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
     return <Text dimColor>No review yet. Run the code-review skill.</Text>
   }
   const sections = groupFindings(review.findings, review.skipped)
+  const { open, pending, done } = counts(review)
   // The first nine rows, in the order shown, open with their digit.
   const order = sections.flatMap(section => section.rows.map(row => row.finding.n))
 
   return (
     <Box flexDirection="column">
+      <Box flexDirection="row" marginBottom={1}>
+        <Text color="cyan">{review.pr}  </Text>
+        <Text>{review.mode === 'mine' ? 'your PR' : 'their PR'}  </Text>
+        <Text dimColor>
+          {open} open · {pending} pending · {done} done
+        </Text>
+      </Box>
       {sections.map(section => (
         <Box key={`s-${section.group}`} flexDirection="column" marginBottom={1}>
           <Box flexDirection="row">
@@ -48,6 +58,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
           ))}
         </Box>
       ))}
+      <Text dimColor>{TIPS[review.mode]}</Text>
     </Box>
   )
 }
