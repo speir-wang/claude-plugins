@@ -6,6 +6,8 @@ import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, To
 import { COMMIT_RULE, MAX_EARLIER, MAX_NEW_COMMITS, MAX_UNTRACKED, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
 import { splitDiff } from './diff'
 import { cleanTitle, readVerdicts } from './model'
+import { earlierSummary, fit, progressBar, rowLook, toolRowLine } from './ui/rows'
+import type { ToolInput } from './ui/rows'
 import { addTodos, fromTodoWrite, linkCommits, listText, pickTarget, progress, renameTodo, setStatus as withStatus } from './todo-list'
 
 const todos = atom({ plugin: 'todo-commits', key: 'todos' } as const, [])
@@ -292,15 +294,7 @@ async function toggleFile($: $, hash: string, path: string) {
   )
 }
 
-/** Cuts or pads text to exactly `width` cells (one cell per character). */
-function fit(text: string, width: number): string {
-  if (width <= 1) {
-    return ''
-  }
-  return text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width)
-}
-
-type TodosInput = { action?: unknown; titles?: unknown; number?: unknown }
+type TodosInput = ToolInput
 
 type TodosAnswer = { text: string; isError?: true }
 
@@ -617,13 +611,8 @@ export const register: Register = on => {
     const columns = e.props.bodyColumns ?? 60
     // icon + space, "12: ", title, space, a 9-wide hash or tag slot
     const titleWidth = Math.max(8, columns - 2 - 4 - 1 - 9 - 1)
-    const { done } = progress(list)
-    const barLength = Math.min(10, Math.max(list.length, 1))
-    const filled = list.length === 0 ? 0 : Math.round((done / list.length) * barLength)
-
-    const linked = new Set(list.flatMap(todo => todo.commits))
-    const earlierCommits = before?.commits.filter(c => !linked.has(c.hash)) ?? []
-    const earlierTotal = before === null ? 0 : before.total - (before.commits.length - earlierCommits.length)
+    const { filled, empty, done, total } = progressBar(list)
+    const { commits: earlierCommits, total: earlierTotal, more } = earlierSummary(before, list)
     const isOpen = await read($, isEarlierOpen)
     const gone = new Set(await read($, dropped))
 
@@ -634,8 +623,8 @@ export const register: Register = on => {
           {list.length > 0 && (
             <Box flexDirection="row">
               <Text color="green">{'▰'.repeat(filled)}</Text>
-              <Text dimColor>{'▱'.repeat(barLength - filled)}</Text>
-              <Text bold> {done}/{list.length}</Text>
+              <Text dimColor>{'▱'.repeat(empty)}</Text>
+              <Text bold> {done}/{total}</Text>
             </Box>
           )}
         </Box>
@@ -653,61 +642,39 @@ export const register: Register = on => {
         )}
 
         {list.map((todo, i) => {
-          const n = i + 1
-          const latest = todo.commits.at(-1)
+          const look = rowLook(todo, i + 1, spin ?? '', gone.has(todo.commits.at(-1) ?? ''), titleWidth)
           const older = todo.commits.slice(0, -1)
-          const isMissing = todo.status === 'completed' && latest === undefined
-          const icon =
-            todo.status === 'pending' ? '☐' : todo.status === 'in_progress' ? spin : isMissing ? '⚠' : '✔'
-          const iconColor =
-            todo.status === 'pending' ? undefined : todo.status === 'in_progress' || isMissing ? 'yellow' : 'green'
-          const title = fit(todo.title, titleWidth)
-          const number = n <= 9 ? `${n}: ` : `${n}:`
+          const opens = look.opens
+          const button =
+            opens === null ? null : (
+              <Button
+                key={look.key}
+                label={look.label}
+                plain
+                hotkey={look.hotkey}
+                hover={{ color: 'cyan' }}
+                onPress={() => (opens.kind === 'working' ? showWorking($) : showCommit($, opens.hash))}
+              />
+            )
 
           return (
             <Box key={`todo-${todo.id}`} flexDirection="column">
               <Box key={`row-${todo.id}`} flexDirection="row">
-                <Text color={iconColor} dimColor={todo.status === 'pending'} bold={todo.status === 'in_progress'}>
-                  {icon}{' '}
+                <Text color={look.iconColor} dimColor={todo.status === 'pending'} bold={todo.status === 'in_progress'}>
+                  {look.icon}{' '}
                 </Text>
-                {latest === undefined && todo.status === 'in_progress' ? (
-                  <Button
-                    key={`w-${todo.id}`}
-                    label={`${n <= 9 ? '' : number}${title} —`}
-                    plain
-                    hotkey={n <= 9 ? String(n) : undefined}
-                    hover={{ color: 'cyan' }}
-                    onPress={() => showWorking($)}
-                  />
-                ) : latest === undefined ? (
+                {button === null ? (
                   <Box flexDirection="row">
-                    <Text dimColor={todo.status !== 'in_progress'} bold={todo.status === 'in_progress'}>
-                      {number}
-                      {title}{' '}
-                    </Text>
-                    {isMissing ? <Text color="yellow">no commit</Text> : <Text dimColor>—</Text>}
+                    <Text dimColor>{look.label}</Text>
+                    {look.tag?.color === undefined ? <Text dimColor>{look.tag?.text}</Text> : <Text color={look.tag.color}>{look.tag.text}</Text>}
                   </Box>
-                ) : gone.has(latest) ? (
-                  <Box flexDirection="row">
-                    <Button
-                      key={`c-${todo.id}-${latest}`}
-                      label={`${n <= 9 ? '' : number}${title} `}
-                      plain
-                      hotkey={n <= 9 ? String(n) : undefined}
-                      hover={{ color: 'cyan' }}
-                      onPress={() => showCommit($, latest)}
-                    />
-                    <Text color="red">dropped</Text>
-                  </Box>
+                ) : look.tag === null ? (
+                  button
                 ) : (
-                  <Button
-                    key={`c-${todo.id}-${latest}`}
-                    label={`${n <= 9 ? '' : number}${title} ${latest.slice(0, 7)}`}
-                    plain
-                    hotkey={n <= 9 ? String(n) : undefined}
-                    hover={{ color: 'cyan' }}
-                    onPress={() => showCommit($, latest)}
-                  />
+                  <Box flexDirection="row">
+                    {button}
+                    <Text color={look.tag.color}>{look.tag.text}</Text>
+                  </Box>
                 )}
               </Box>
               {older.length > 0 && (
@@ -754,9 +721,9 @@ export const register: Register = on => {
                   />
                 </Box>
               ))}
-            {isOpen && earlierTotal > earlierCommits.length && (
+            {isOpen && more > 0 && (
               <Text dimColor>
-                {'  '}and {earlierTotal - earlierCommits.length} more (since {before.base})
+                {'  '}and {more} more (since {before.base})
               </Text>
             )}
           </Box>
@@ -777,20 +744,7 @@ export const register: Register = on => {
       return next(e)
     }
     const { Box, Text } = $.ui.resolve(e)
-    const { action, titles, number } = (input ?? {}) as TodosInput
-    const list = await read($, todos)
-    const todo = typeof number === 'number' ? list[number - 1] : undefined
-    const names = Array.isArray(titles) ? titles.filter((t): t is string => typeof t === 'string') : []
-    const hash = todo?.commits.at(-1)?.slice(0, 7)
-
-    const [icon, color, text] =
-      action === 'add'
-        ? ['☐', undefined, names.length === 1 ? `Added: ${names[0]}` : `Added ${names.length} todos: ${names[0] ?? ''}…`]
-        : action === 'start'
-          ? ['▸', 'yellow', `Started ${String(number)}: ${todo?.title ?? ''}`]
-          : action === 'done'
-            ? ['✔', 'green', `Done ${String(number)}: ${todo?.title ?? ''}${hash === undefined ? '' : ` · ${hash}`}`]
-            : ['⊘', undefined, 'Cleared the todos']
+    const { icon, color, text } = toolRowLine((input ?? {}) as TodosInput, await read($, todos))
 
     return (
       <Box flexDirection="row">
