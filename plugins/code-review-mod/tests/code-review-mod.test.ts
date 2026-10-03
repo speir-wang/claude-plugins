@@ -150,6 +150,7 @@ test('the code-review skill opens the panel and carries the rule', async ($, on)
   expect(prompted.text).toMatch(/^Review the branch\./)
   expect(prompted.text).toMatch(TOOL)
   expect(prompted.text).toMatch('9-10 a bug or a broken spec')
+  expect(prompted.text).toMatch('Only for the mattpocock-skills:code-review skill')
   expect(w.opened.map(o => o.id)).toEqual(['code-review-mod'])
 })
 
@@ -660,8 +661,11 @@ test('a message with a PR link tells Claude a re-check is possible, rule include
   await $.prompt.submit({ text: 'are my comments on https://github.com/acme/shop/pull/7 addressed?' } as never)
   await $.prompt.submit({ text: 'no link here' } as never)
 
-  expect(w.contexts[0]?.join('\n')).toMatch('acme/shop#7')
-  expect(w.contexts[0]?.join('\n')).toMatch(TOOL)
+  const note = w.contexts[0]?.join('\n') ?? ''
+  expect(note).toMatch('acme/shop#7')
+  expect(note).toMatch(TOOL)
+  // Only the re-check: a built-in /code-review with a link must not be told to record findings.
+  expect(note).not.toMatch('record every finding')
   expect(w.contexts[1]).toBeUndefined()
 })
 
@@ -676,6 +680,8 @@ test('in a new session, starting their PR rebuilds the list from your GitHub com
   expect(started.text).toMatch('#1 src/app.ts:12 Could 3000 get a name?')
   expect(started.text).toMatch('#2 src/b.ts:4 Is this check needed?')
   expect(started.text).toMatch(`${OLD}..HEAD`)
+  expect(started.text).toMatch('9-10 a bug or a broken spec')
+  expect(started.text).toMatch('"comment"')
   expect(w.ran.some(l => l.includes('--paginate'))).toBe(true)
 
   await review($, { action: 'outcome', number: 1, outcome: 'addressed' })

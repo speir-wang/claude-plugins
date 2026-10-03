@@ -28,7 +28,7 @@ export const KEYS = {
 export const SCORE_SCALE = '9-10 a bug or a broken spec; 6-8 fix before merging; 3-5 nice to have; 1-2 nitpick'
 
 export const RULE = [
-  `The user has a review panel. It only shows what you record with the ${TOOL} tool, so follow these rules for code reviews:`,
+  `The user has a review panel. It only shows what you record with the ${TOOL} tool. Only for the ${SKILL} skill and re-checks of its review (never for the built-in /code-review), follow these rules:`,
   `- When a review starts, call ${TOOL} "start" with "pr" (owner/repo#number when the user gave a PR link, else the branch name), "mode" ("theirs" when the user gave a PR link, "mine" for their own branch) and "head" (the full commit hash reviewed).`,
   `- After the reviewers report back, record every finding with ${TOOL} "add", one call per finding: group ("standards" or "spec"), weight ("must" when a written rule or the spec is broken, "maybe" for a judgement call), score, file, line, title (short), now (the code as it is now), suggested (better code, or "" when there is none) and why (why it matters, written for the user).`,
   `- Score each finding 1-10 on how much it is worth fixing: ${SCORE_SCALE}.`,
@@ -40,13 +40,16 @@ export const RULE = [
   `- To re-check: call ${TOOL} "start" again with the same pr and the new head. Its answer lists the findings to check and the commit to review from. Record each one with "outcome" (number, outcome "addressed", "wrong" or "missed", note). Then run the code review on every commit since that commit, and record new problems with "add" as usual.`,
 ].join('\n')
 
-/** The note added to a message that links a GitHub PR, so a plain "are my comments addressed?" works in any session. */
+/**
+ * The note added to a message that links a GitHub PR, so a plain "are my
+ * comments addressed?" works in any session. It carries no rule for recording
+ * findings: a built-in /code-review with a link must not pick that up.
+ */
 export function recheckNote(prs: string[]): string {
   return [
     `The user's message links ${prs.join(', ')}. If they ask whether their review comments there were addressed, re-check it with the review panel:`,
     `call ${TOOL} "start" with that pr, mode "theirs" and the PR's head commit (gh pr view <number> -R <owner/repo> --json headRefOid).`,
     'It rebuilds the review from their own GitHub comments and answers with what to check.',
-    '',
-    RULE,
+    'Otherwise ignore this note.',
   ].join('\n')
 }

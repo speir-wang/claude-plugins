@@ -1,6 +1,6 @@
 import type { Finding, FindingStatus, Group, Incoming, Outcome, Review, ReviewInput } from '../types'
 
-import { TOOL_NAME } from './config'
+import { SCORE_SCALE, TOOL_NAME } from './config'
 import { hasPr, readMyComments } from './github'
 import { pickMode, readPr } from './mode'
 import { applyOutcome, checkLine, toCheck } from './recheck'
@@ -59,7 +59,9 @@ function recheckAnswer(review: Review): string {
       ? 'No findings to check.'
       : `Check each of these and record it with "outcome": ${checks.join('; ')}.`
 
-  return `Round ${round} of ${review.pr} started. ${todo} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add".`
+  const comment = review.mode === 'theirs' ? ', each with a short, polite "comment" asked as a question' : ''
+
+  return `Round ${round} of ${review.pr} started. ${todo} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add" (score: ${SCORE_SCALE}${comment}).`
 }
 
 /** A review of their PR rebuilt from your GitHub comments, its re-check round open at `head`. */
