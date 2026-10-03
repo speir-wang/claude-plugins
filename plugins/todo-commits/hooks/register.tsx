@@ -5,6 +5,7 @@ import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, To
 
 import { COMMIT_RULE, MAX_EARLIER, MAX_NEW_COMMITS, MAX_UNTRACKED, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
 import { splitDiff } from './diff'
+import { cleanTitle, readVerdicts } from './model'
 import { addTodos, fromTodoWrite, linkCommits, listText, pickTarget, progress, renameTodo, setStatus as withStatus } from './todo-list'
 
 const todos = atom({ plugin: 'todo-commits', key: 'todos' } as const, [])
@@ -193,22 +194,8 @@ async function judgeLargeFiles($: $, message: string, files: CommitFile[]): Prom
       'Answer with JSON only: [{"path": "...", "isWorth": true|false, "reason": "one short plain sentence"}]',
     ].join('\n'),
   })
-  const verdicts = new Map<string, DiffVerdict>()
-  if (!asked.isAnswered) {
-    return verdicts
-  }
-  try {
-    const json: unknown = JSON.parse(asked.text.slice(asked.text.indexOf('['), asked.text.lastIndexOf(']') + 1))
-    for (const item of Array.isArray(json) ? json : []) {
-      if (typeof item?.path === 'string' && typeof item?.reason === 'string') {
-        verdicts.set(item.path, { isWorth: item.isWorth !== false, reason: item.reason })
-      }
-    }
-  } catch {
-    // A reply that is not JSON leaves the files without a verdict.
-  }
 
-  return verdicts
+  return asked.isAnswered ? readVerdicts(asked.text) : new Map<string, DiffVerdict>()
 }
 
 /** Shows a diff in the pane, folding large files and asking the model about them. */
@@ -290,9 +277,8 @@ async function tidyTitle($: $, typed: string): Promise<string | undefined> {
   if (!asked.isAnswered) {
     return undefined
   }
-  const title = asked.text.trim().split('\n')[0]?.replace(/^["'`]+|["'`.]+$/g, '').trim() ?? ''
 
-  return title === '' || title.length > 80 ? undefined : title
+  return cleanTitle(asked.text)
 }
 
 async function toggleFile($: $, hash: string, path: string) {
