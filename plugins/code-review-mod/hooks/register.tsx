@@ -6,6 +6,7 @@ import type { ReviewInput } from '../types'
 import {
   askAbout,
   backToList,
+  confirmStep,
   drop,
   fixIt,
   openFinding,
@@ -15,6 +16,7 @@ import {
   replaceReview,
   rewrite,
   saveEdit,
+  showConfirm,
   showInput,
   showSubmit,
   submitReview,
@@ -26,6 +28,7 @@ import { PANE, PANE_TITLE, RULE, TOOL, recheckNote } from './config'
 import { prLinks } from './mode'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
+import { drawConfirmPane } from './ui/confirm-pane'
 import { drawFindingPane } from './ui/finding-pane'
 import { drawListPane } from './ui/list-pane'
 import { drawSubmitPane } from './ui/submit-pane'
@@ -155,9 +158,13 @@ export const register: Register = on => {
       })
     }
 
+    if (current !== null && shown.kind === 'confirm') {
+      return drawConfirmPane(parts, shown.step, current.pr, { confirm: () => confirmStep(ports($)), cancel: () => backToList(ports($)) })
+    }
+
     return drawListPane(
       parts,
-      { review: current, asking: waiting?.answer === 'ask' ? waiting.review.pr : null, columns },
+      { review: current, asking: waiting?.answer === 'ask' ? waiting.review.pr : null, notice: await read($, notice), columns },
       {
         open: n => openFinding(ports($), n),
         flipMode: () => switchMode(ports($)),
@@ -165,6 +172,7 @@ export const register: Register = on => {
         replace: () => replaceReview(ports($)),
         keep: () => keepReview(ports($)),
         recheck: () => recheck(ports($)),
+        next: step => showConfirm(ports($), step),
       },
     )
   })

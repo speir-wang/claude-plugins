@@ -76,3 +76,14 @@ export async function readMyComments(p: Run, pr: string): Promise<{ findings: Fi
 
   return rebuild(jsonLines<GitHubComment>(await list('comments')), jsonLines<GitHubReview>(await list('reviews')), me)
 }
+
+/** Approves the PR. Answers what went wrong, or nothing. */
+export async function approvePr(p: Run, pr: string): Promise<string | undefined> {
+  const place = splitPr(pr)
+  if (place === undefined) {
+    return `${pr} is not a GitHub PR.`
+  }
+  const ran = await p.run(['gh', 'pr', 'review', String(place.number), '-R', place.repo, '--approve'])
+
+  return ran.exitCode === 0 ? undefined : why(ran)
+}

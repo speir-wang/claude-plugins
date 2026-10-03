@@ -4,7 +4,7 @@ import { TIPS } from '../config'
 import { groupFindings } from '../order'
 import type { Section } from '../order'
 import { roundSummaries } from '../recheck'
-import { counts } from '../review'
+import { counts, nextStep } from '../review'
 import type { Parts } from './parts'
 import { findingLabel, outcomeTag, statusTag } from './rows'
 
@@ -13,6 +13,8 @@ export type ListData = {
   review: Review | null
   /** The PR of a review waiting for "replace or keep", when there is one. */
   asking: string | null
+  /** The last thing that went wrong or happened, shown once; '' for none. */
+  notice: string
   columns: number
 }
 
@@ -24,6 +26,7 @@ export type ListActions = {
   replace: () => void | Promise<void>
   keep: () => void | Promise<void>
   recheck: () => void | Promise<void>
+  next: (step: 'approve' | 'create') => void | Promise<void>
 }
 
 /** One block of sections: the first round, then one per re-check that found new problems. */
@@ -43,7 +46,7 @@ function blocks(review: Review): Block[] {
 
 /** Draws the review: rounds, then the Standards and Spec sections, each sorted by score. */
 export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actions: ListActions) {
-  const { review, asking, columns } = data
+  const { review, asking, notice, columns } = data
   if (review === null) {
     return <Text dimColor>No review yet. Run the code-review skill.</Text>
   }
@@ -52,6 +55,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
   // The first nine rows, in the order shown, open with their digit.
   const order = shown.flatMap(block => block.sections.flatMap(section => section.rows.map(row => row.finding.n)))
   const rounds = roundSummaries(review)
+  const step = nextStep(review)
 
   return (
     <Box flexDirection="column">
@@ -137,6 +141,17 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
           ))}
         </Box>
       ))}
+      {step !== null && (
+        <Box key="next-box" flexDirection="row" marginBottom={1}>
+          <Text color="green">Nothing left to do.  </Text>
+          <Button key="next" label={step === 'approve' ? 'Approve PR' : 'Create PR'} variant="primary" onPress={() => actions.next(step)} />
+        </Box>
+      )}
+      {notice !== '' && (
+        <Box marginBottom={1}>
+          <Text color="yellow">{notice}</Text>
+        </Box>
+      )}
       <Text dimColor>{TIPS[review.mode]}</Text>
     </Box>
   )

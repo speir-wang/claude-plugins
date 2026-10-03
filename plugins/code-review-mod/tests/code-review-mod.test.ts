@@ -706,3 +706,56 @@ test('on their PR a re-check in the same session also rebuilds from GitHub', asy
   expect(started.text).toMatch('#1 src/app.ts:12 Could 3000 get a name?')
   expect(await paneText($)).toMatch('Your comments')
 })
+
+const APPROVE = 'gh pr review 7 -R acme/shop --approve'
+
+test('when every finding on their PR is posted or dropped, Approve PR shows and asks before approving', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = '{"id": 1}'
+  w.answers[APPROVE] = ''
+  const drawn = await openTheirs($)
+  expect(await drawn.find({ key: 'next' })).toBeUndefined()
+  await drawn.press({ key: 'back' })
+  expect(await drawn.find({ key: 'next' })).toBeUndefined()
+
+  await drawn.press({ key: 'f-1' })
+  await drawn.press({ key: 'pending' })
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'post' })
+  expect(String((await drawn.find({ key: 'next' }))?.props.label)).toBe('Approve PR')
+
+  await drawn.press({ key: 'next' })
+  expect(w.ran).not.toContain(APPROVE)
+  expect((await texts(drawn)).join(' ')).toMatch('Approve acme/shop#7 on GitHub?')
+  await drawn.press({ key: 'confirm' })
+  expect(w.ran).toContain(APPROVE)
+  expect((await texts(drawn)).join(' ')).toMatch('Approved acme/shop#7.')
+})
+
+test('when every finding on your branch is fixed or won\'t fix, Create PR shows and asks first', async ($, on) => {
+  const w = world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { ...FINDING, title: 'Other' })
+  await review($, { action: 'set-status', number: 1, status: 'fixed' })
+  const drawn = await pane($)
+  expect(await drawn.find({ key: 'next' })).toBeUndefined()
+
+  await review($, { action: 'set-status', number: 2, status: 'wontfix' })
+  expect(String((await drawn.find({ key: 'next' }))?.props.label)).toBe('Create PR')
+  await drawn.press({ key: 'next' })
+  await drawn.press({ key: 'cancel' })
+  expect(w.submitted).toEqual([])
+
+  await drawn.press({ key: 'next' })
+  await drawn.press({ key: 'confirm' })
+  expect(w.submitted).toHaveLength(1)
+  expect(w.submitted[0]).toMatch('Create a GitHub PR for the branch feature')
+})
+
+test('a review with no findings suggests the next step at once', async ($, on) => {
+  world(on)
+  await startMine($)
+
+  expect(await paneText($)).toMatch('Create PR')
+})

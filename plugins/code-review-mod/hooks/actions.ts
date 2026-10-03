@@ -2,7 +2,7 @@ import type { Finding, ReviewEvent } from '../types'
 
 import { TODO_TOOL, TOOL } from './config'
 import { rewriteDraft } from './draft'
-import { postReview } from './github'
+import { approvePr, postReview } from './github'
 import { flipMode } from './mode'
 import type { Ports } from './ports'
 import { changeFinding, setStatus } from './review'
@@ -182,4 +182,28 @@ export async function recheck(p: Pick<Ports, 'review' | 'submit'>) {
   if (review !== null) {
     await p.submit(`Re-check the code review of ${review.pr}: call ${TOOL} "start" with pr "${review.pr}" and the current HEAD, then follow its answer.`)
   }
+}
+
+/** Approve PR / Create PR: the confirm step first. */
+export async function showConfirm(p: ViewPorts & Pick<Ports, 'notice'>, step: 'approve' | 'create') {
+  await p.notice.update(() => '')
+  await p.view.update(() => ({ kind: 'confirm', step }))
+  await p.openPane({ closeOnEscape: true })
+}
+
+/** Runs the confirmed step: approve on GitHub, or ask Claude to create the PR. */
+export async function confirmStep(p: ViewPorts & Pick<Ports, 'review' | 'notice' | 'run' | 'submit'>) {
+  const review = await p.review.get()
+  const view = await p.view.get()
+  if (review === null || view.kind !== 'confirm') {
+    return
+  }
+  if (view.step === 'create') {
+    await p.submit(`Create a GitHub PR for the branch ${review.pr}: push it, then run gh pr create with a short title and a description written from its commits.`)
+    await backToList(p)
+    return
+  }
+  const failed = await approvePr(p, review.pr)
+  await p.notice.update(() => (failed === undefined ? `Approved ${review.pr}.` : `Not approved: ${failed}`))
+  await backToList(p)
 }
