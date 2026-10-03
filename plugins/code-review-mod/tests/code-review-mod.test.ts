@@ -822,3 +822,34 @@ test('/clear starts the next session with no review', async ($, on) => {
 
   expect(await paneText($)).toMatch('No review yet')
 })
+
+/** Each Button that has a letter or digit, by its key. */
+async function hotkeys(drawn: { findAll: (q: { type: 'Button' }) => Promise<{ key?: string; props: Record<string, unknown> }[]> }) {
+  return Object.fromEntries((await drawn.findAll({ type: 'Button' })).filter(b => b.props.hotkey !== undefined).map(b => [b.key, b.props.hotkey]))
+}
+
+test('each button in a finding on your PR has its letter, and the detail view says so', async ($, on) => {
+  world(on)
+  const mine = await openMine($)
+
+  expect(await hotkeys(mine)).toEqual({ fix: 'f', wontfix: 'w', ask: 'a' })
+  expect((await texts(mine)).join(' ')).toMatch('Esc back')
+})
+
+test('each button in a finding on their PR has its letter', async ($, on) => {
+  world(on)
+  const theirs = await openTheirs($)
+
+  expect(await hotkeys(theirs)).toEqual({ pending: 'p', drop: 'd', edit: 'e', rewrite: 'r' })
+})
+
+test('the first nine rows open with their digit, in the order shown', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, { ...FINDING, title: 'Low', score: 2 })
+  await review($, { ...FINDING, title: 'High', score: 9 })
+  const drawn = await pane($)
+
+  expect(String((await drawn.find({ key: 'f-2' }))?.props.hotkey)).toBe('1')
+  expect(String((await drawn.find({ key: 'f-1' }))?.props.hotkey)).toBe('2')
+})

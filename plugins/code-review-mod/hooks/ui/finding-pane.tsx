@@ -1,5 +1,6 @@
 import type { Finding, Mode, View } from '../../types'
 
+import { KEYS } from '../config'
 import { draftBody } from '../draft'
 
 import type { Parts } from './parts'
@@ -115,6 +116,10 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
           <Button key="ask" label="Ask Claude" hotkey="a" onPress={actions.ask} />
         </Box>
       )}
+
+      <Box marginTop={1}>
+        <Text dimColor>{mode === 'mine' ? KEYS.mine : KEYS.theirs}</Text>
+      </Box>
     </Box>
   )
 }
