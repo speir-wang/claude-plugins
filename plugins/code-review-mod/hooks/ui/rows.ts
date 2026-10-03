@@ -1,4 +1,4 @@
-import type { ReviewInput } from '../../types'
+import type { Finding, ReviewInput } from '../../types'
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
@@ -20,4 +20,21 @@ export function toolRowLine(input: ReviewInput): { icon: string; color: 'yellow'
   }
 
   return { icon: '•', color: undefined, text: `#${String(number)} ${text(input.status)}` }
+}
+
+/** Cuts or pads text to exactly `width` cells (one cell per character). */
+export function fit(text: string, width: number): string {
+  if (width <= 1) {
+    return ''
+  }
+  return text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width)
+}
+
+/** One finding row: score, must/maybe, file:line and the title, cut to `width`. */
+export function findingLabel(finding: Finding, width: number): string {
+  const score = finding.score === 0 ? ' —' : String(finding.score).padStart(2)
+  const weight = finding.group === 'comment' ? '     ' : finding.weight.padEnd(5)
+  const place = `${finding.file}:${finding.line}`
+
+  return fit(`${score} ${weight} ${place}  ${finding.title}`, width).trimEnd()
 }

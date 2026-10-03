@@ -127,10 +127,17 @@ async function pane($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
   return $.ui.mount({ plugin: 'code-review-mod', surface, component: 'Pane', requestId: 'code-review-mod', props: PANE_PROPS })
 }
 
+/** The Text elements drawn in the pane, read once. */
+async function paneTexts($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
+  const drawn = await pane($, surface)
+  const texts = await drawn.findAll({ type: 'Text' })
+  await drawn.unmount()
+  return texts
+}
+
 /** All the text drawn in the pane, one string. */
 async function paneText($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
-  const drawn = await pane($, surface)
-  return (await drawn.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  return (await paneTexts($, surface)).map(t => t.text).join('\n')
 }
 
 test('the code-review skill opens the panel and carries the rule', async ($, on) => {
@@ -204,4 +211,29 @@ test('review tool calls draw as one line in the chat', async ($, on) => {
   expect(texts).toMatch('Name the magic number')
   const result = await $.ui.mount({ plugin: 'code-review-mod', surface: 'terminal', component: 'ToolResult', requestId: 'res', props: { tool_use_id: 'res', tool: TOOL, output: 'x', isErrored: false } as never })
   expect((await result.findAll({ type: 'Text' })).length).toBe(0)
+})
+
+test('the panel shows Standards then Spec, sorted by score, with a skipped Spec explained', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, { ...FINDING, title: 'Low one', score: 2 })
+  await review($, { ...FINDING, title: 'High one', score: 8, weight: 'must', file: 'src/b.ts', line: 3 })
+  await review($, { action: 'skipped', group: 'spec', reason: 'no spec found' })
+
+  const text = await paneText($)
+  expect(text.indexOf('Standards')).toBeLessThan(text.indexOf('High one'))
+  expect(text.indexOf('High one')).toBeLessThan(text.indexOf('Low one'))
+  expect(text.indexOf('Low one')).toBeLessThan(text.indexOf('Spec'))
+  expect(text).toMatch('skipped, no spec found')
+  expect(text).toMatch(/8 +must +src\/b\.ts:3/)
+  const low = (await paneTexts($)).find(t => t.text.includes('Low one'))
+  expect(low?.props.dimColor).toBe(true)
+})
+
+test('a group with no findings says nothing found', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+
+  expect(await paneText($)).toMatch(/Spec\s+nothing found/)
 })

@@ -79,7 +79,7 @@ export const register: Register = on => {
 
   // Written out for the loader: this is PANE.
   on('ui.render', { component: 'Pane', requestId: 'code-review-mod' }, async ($, e) => {
-    return drawListPane($.ui.resolve(e), await read($, review))
+    return drawListPane($.ui.resolve(e), { review: await read($, review), columns: e.props.bodyColumns ?? 60 })
   })
 
   // The review tool's calls draw as one line; the panel shows the review itself.
