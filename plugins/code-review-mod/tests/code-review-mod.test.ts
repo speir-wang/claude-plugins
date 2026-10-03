@@ -918,3 +918,25 @@ test('a row shows the file name only; the finding shows the full path', async ($
   await drawn.press({ key: 'f-1' })
   expect(await texts(drawn)).toContain('plugins/deep/hooks/review.ts:75')
 })
+
+test('a re-check of their PR keeps drafts not posted yet, after your GitHub comments', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  w.answers['gh api user'] = 'me\n'
+  await review($, { action: 'start', pr: 'acme/shop#7', head: OLD })
+  await review($, { ...THEIRS, title: 'Still a draft' })
+  await review($, { ...THEIRS, title: 'In the pile' })
+  const drawn = await pane($)
+  await drawn.press({ key: 'f-2' })
+  await drawn.press({ key: 'pending' })
+
+  fakeGitHub(w)
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+
+  expect(started.text).not.toMatch('Still a draft')
+  const labels = (await drawn.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  expect(labels.find(l => l.includes('Still a draft'))).toMatch(/^#3 /)
+  expect(labels.find(l => l.includes('In the pile'))).toMatch(/^#4 /)
+  expect(await texts(drawn)).toContain('in review')
+  expect(String((await drawn.find({ key: 'submit' }))?.props.label)).toBe('1 pending · Submit review')
+})

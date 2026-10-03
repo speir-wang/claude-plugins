@@ -67,6 +67,15 @@ function fromComments(pr: string, head: string, rebuilt: { findings: Finding[]; 
   return { pr, mode: 'theirs', rounds: [{ n: 1, head: rebuilt.base }, { n: 2, head }], findings: rebuilt.findings, skipped: [] }
 }
 
+/** Adds the findings not posted yet (open, in the pile, dropped) after the rebuilt ones, so no draft is lost. */
+function keepUnposted(fresh: Review, current: Review): Review {
+  const kept = current.findings
+    .filter(f => f.status !== 'posted')
+    .map((f, i) => ({ ...f, n: fresh.findings.length + i + 1, round: 1 }))
+
+  return { ...fresh, findings: [...fresh.findings, ...kept] }
+}
+
 /** Opens a review, or the next round of the same one. */
 async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   const pr = typeof input.pr === 'string' ? input.pr.trim() : ''
@@ -88,7 +97,7 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
     // On their PR, GitHub holds what was posted: every re-check starts from it.
     const rebuilt = current.mode === 'theirs' ? await readMyComments(p, pr) : null
     if (rebuilt !== null) {
-      const fresh = fromComments(pr, head, rebuilt)
+      const fresh = keepUnposted(fromComments(pr, head, rebuilt), current)
       await p.review.update(() => fresh)
       await p.isChanged.update(() => true)
       return { text: recheckAnswer(fresh) }
