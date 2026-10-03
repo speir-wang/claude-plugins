@@ -759,3 +759,20 @@ test('a review with no findings suggests the next step at once', async ($, on) =
 
   expect(await paneText($)).toMatch('Create PR')
 })
+
+const turnEnd = (agentId?: string) => ({ answer: 'Standards: 1 finding.', durationMs: 1, isAborted: false, turnId: 'turn', reason: 'end_turn', ...(agentId === undefined ? {} : { agentId }) }) as never
+
+test('when a turn that changed the review ends, the review tab comes to the front once', async ($, on) => {
+  const w = world(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await startMine($)
+  await review($, FINDING)
+
+  await $.turn.complete(turnEnd('sub-agent'))
+  expect(w.opened.filter(o => o.focus === true)).toEqual([])
+  await $.turn.complete(turnEnd())
+  expect(w.opened.filter(o => o.focus === true)).toEqual([{ id: 'code-review-mod', focus: true }])
+
+  await $.turn.complete(turnEnd())
+  expect(w.opened.filter(o => o.focus === true)).toHaveLength(1)
+})

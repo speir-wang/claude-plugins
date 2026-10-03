@@ -93,6 +93,17 @@ export const register: Register = on => {
     return answer.isError ? { result: answer.text, isError: true as const } : { result: answer.text }
   })
 
+  // A review or re-check that changed the list brings its tab to the front when the turn ends.
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId === undefined && (await read($, isChanged))) {
+      await update($, isChanged, () => false)
+      await ports($).openPane({ focus: true })
+    }
+
+    return done
+  })
+
   // A message with a PR link may ask for a re-check: tell Claude how, rule included.
   on('prompt.submit', async ($, e, next) => {
     const prs = prLinks(e.text)
