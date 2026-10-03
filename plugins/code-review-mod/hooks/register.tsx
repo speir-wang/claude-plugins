@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Review, ReviewInput } from '../types'
+import type { Incoming, Review, ReviewInput } from '../types'
 
 import {
   askAbout,
@@ -45,9 +45,17 @@ const notice = atom({ plugin: 'code-review-mod', key: 'notice' } as const, '')
 
 type $ = EngineInterface
 
-/** A review saved for `claude --resume`. */
-function isSaved(value: unknown): value is { savedAt: number; review: Review } {
+/** A review saved for `claude --resume`, with the one waiting for "Replace?" if any. */
+type Saved = { savedAt: number; review: Review | null; incoming?: Incoming | null }
+
+function isSaved(value: unknown): value is Saved {
   return typeof value === 'object' && value !== null && 'savedAt' in value && typeof value.savedAt === 'number' && 'review' in value
+}
+
+/** Saves the review, and the one waiting for "Replace?", under this session's id. */
+async function save($: $) {
+  const saved: Saved = { savedAt: await $.clock.now(), review: await read($, review), incoming: await read($, incoming) }
+  await $.store.set(`${SAVED}${await $.session.id()}`, saved)
 }
 
 /** The engine's calls the other modules use, built for one event (see Ports). */
@@ -69,11 +77,18 @@ function ports($: $): Ports {
       // Every change is saved under this session's id, so `claude --resume` brings it back.
       update: async change => {
         const changed = await update($, review, change)
-        await $.store.set(`${SAVED}${await $.session.id()}`, { savedAt: await $.clock.now(), review: changed })
+        await save($)
         return changed
       },
     },
-    incoming: { get: () => read($, incoming), update: change => update($, incoming, change) },
+    incoming: {
+      get: () => read($, incoming),
+      update: async change => {
+        const changed = await update($, incoming, change)
+        await save($)
+        return changed
+      },
+    },
     view: { get: () => read($, view), update: change => update($, view, change) },
     isChanged: { get: () => read($, isChanged), update: change => update($, isChanged, change) },
     isReviewing: { get: () => read($, isReviewing), update: change => update($, isReviewing, change) },
@@ -91,6 +106,7 @@ async function restore($: $) {
       await $.store.delete(key)
     } else if (key === `${SAVED}${id}` && (await read($, review)) === null) {
       await update($, review, () => saved.review)
+      await update($, incoming, () => saved.incoming ?? null)
       await ports($).openPane()
     }
   }

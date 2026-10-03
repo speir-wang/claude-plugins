@@ -985,3 +985,25 @@ test('after Create PR is confirmed it is not offered again', async ($, on) => {
 
   expect(await drawn.find({ key: 'next' })).toBeUndefined()
 })
+
+test('a review waiting for Replace? is saved too, and the question comes back on resume', async ($, on) => {
+  const w = world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+  await review($, { ...FINDING, title: 'From the new PR' })
+
+  const saved = w.store['review:s1'] as { incoming: { review: { pr: string; findings: unknown[] }; answer: string } }
+  expect(saved.incoming.review.pr).toBe('acme/shop#7')
+  expect(saved.incoming.review.findings).toHaveLength(1)
+  expect(saved.incoming.answer).toBe('ask')
+})
+
+test('on resume the Replace? question is asked again', async ($, on) => {
+  const base = { mode: 'mine', rounds: [{ n: 1, head: HEAD }], findings: [], skipped: [] }
+  world(on, { 'review:s1': { savedAt: 1_000_000, review: { ...base, pr: 'feature' }, incoming: { review: { ...base, pr: 'acme/shop#7', mode: 'theirs' }, answer: 'ask' } } })
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  expect(await paneText($)).toMatch('Replace the review of feature with acme/shop#7?')
+})
