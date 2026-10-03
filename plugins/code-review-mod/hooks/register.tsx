@@ -11,6 +11,7 @@ import {
   fixIt,
   openFinding,
   keepReview,
+  numberRows,
   pickEvent,
   recheck,
   replaceReview,
@@ -128,8 +129,9 @@ export const register: Register = on => {
   // When the main turn ends the review is done; if it changed the list, its tab comes to the front.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined) {
+    if (e.agentId === undefined && (await read($, isReviewing))) {
       await update($, isReviewing, () => false)
+      await numberRows(ports($))
     }
     if (e.agentId === undefined && (await read($, isChanged))) {
       await update($, isChanged, () => false)

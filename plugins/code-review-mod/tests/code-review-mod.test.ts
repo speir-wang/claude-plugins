@@ -850,15 +850,20 @@ test('each button in a finding on their PR has its letter', async ($, on) => {
   expect(await hotkeys(theirs)).toEqual({ pending: 'p', drop: 'd', edit: 'e', rewrite: 'r' })
 })
 
-test('the first nine rows open with their digit, in the order shown', async ($, on) => {
-  world(on)
+test('when the review ends every row is numbered top to bottom, and "fix 3" means the third row', async ($, on) => {
+  const w = world(on)
   await startMine($)
-  await review($, { ...FINDING, title: 'Low', score: 2 })
-  await review($, { ...FINDING, title: 'High', score: 9 })
-  const drawn = await pane($)
+  for (let i = 1; i <= 12; i++) await review($, { ...FINDING, group: i % 2 === 0 ? 'spec' : 'standards', score: (i % 10) + 1, title: `T${i}` })
+  await $.turn.complete(turnEnd())
 
-  expect(String((await drawn.find({ key: 'f-2' }))?.props.hotkey)).toBe('1')
-  expect(String((await drawn.find({ key: 'f-1' }))?.props.hotkey)).toBe('2')
+  const drawn = await pane($)
+  const labels = (await drawn.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(l => l.startsWith('#'))
+  expect(labels.map(l => l.split(' ')[0])).toEqual(['#1', '#2', '#3', '#4', '#5', '#6', '#7', '#8', '#9', '#10', '#11', '#12'])
+  expect((await drawn.findAll({ type: 'Button' })).some(b => b.props.hotkey !== undefined && /^\d$/.test(String(b.props.hotkey)))).toBe(false)
+
+  await review($, { action: 'set-status', number: 3, status: 'wontfix' })
+  expect(String((await drawn.find({ key: 'f-3' }))?.props.label)).toBe(labels[2])
+  expect(w.called).toEqual([])
 })
 
 test('while the review runs, empty groups say reviewing and no next step is offered', async ($, on) => {
@@ -890,7 +895,7 @@ test('a row shows the file name only; the finding shows the full path', async ($
   const drawn = await pane($)
 
   const label = String((await drawn.find({ key: 'f-1' }))?.props.label)
-  expect(label).toMatch(/^ *4\/10 +review\.ts:75  Name the magic number$/)
+  expect(label).toMatch(/^#1 +4\/10 +review\.ts:75  Name the magic number$/)
   await drawn.press({ key: 'f-1' })
   expect(await texts(drawn)).toContain('plugins/deep/hooks/review.ts:75')
 })

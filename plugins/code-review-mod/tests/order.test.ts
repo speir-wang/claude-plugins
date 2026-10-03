@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Finding } from '../types'
 
-import { groupFindings } from '../hooks/order'
+import { groupFindings, renumber } from '../hooks/order'
 
 const finding = (n: number, group: Finding['group'], score: number): Finding => ({
   n,
@@ -53,4 +53,25 @@ test('findings rebuilt from your comments get their own section, in the order po
 
   expect(sections.map(s => s.label)).toEqual(['Standards', 'Spec', 'Your comments'])
   expect(sections[2]!.rows.map(r => [r.finding.n, r.isGrey])).toEqual([[1, false], [2, false]])
+})
+
+test('when a round ends its findings are numbered top to bottom, Standards then Spec, after earlier rounds', () => {
+  const earlier = { ...finding(1, 'standards', 3), round: 1 }
+  const review = {
+    pr: 'x',
+    mode: 'mine' as const,
+    rounds: [{ n: 1, head: 'h1' }, { n: 2, head: 'h2' }],
+    skipped: [],
+    findings: [earlier, { ...finding(2, 'spec', 9), round: 2 }, { ...finding(3, 'standards', 2), round: 2 }, { ...finding(4, 'standards', 8), round: 2 }],
+  }
+
+  const { review: numbered, moved } = renumber(review)
+
+  expect(numbered.findings.map(f => [f.title, f.n])).toEqual([
+    ['F1', 1],
+    ['F2', 4],
+    ['F3', 3],
+    ['F4', 2],
+  ])
+  expect(moved.get(4)).toBe(2)
 })

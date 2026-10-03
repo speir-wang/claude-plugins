@@ -1,4 +1,4 @@
-import type { Finding, Group } from '../types'
+import type { Finding, Group, Review } from '../types'
 
 export type Row = { finding: Finding; isGrey: boolean }
 
@@ -32,4 +32,18 @@ export function groupFindings(findings: Finding[], skipped: { group: Group; reas
   const comments = section('comment')
 
   return [section('standards'), section('spec'), ...(comments.rows.length > 0 ? [comments] : [])]
+}
+
+/**
+ * Numbers the round in progress the way the panel lists it: Standards then
+ * Spec, by score, after every earlier round's numbers. Done once the round
+ * ends, so "fix 3" means the third row. `moved` maps old numbers to new.
+ */
+export function renumber(review: Review): { review: Review; moved: Map<number, number> } {
+  const round = review.rounds.at(-1)?.n ?? 1
+  const before = review.findings.filter(f => f.round !== round).reduce((max, f) => Math.max(max, f.n), 0)
+  const shown = groupFindings(review.findings.filter(f => f.round === round), []).flatMap(section => section.rows.map(row => row.finding.n))
+  const moved = new Map(shown.map((n, i) => [n, before + i + 1]))
+
+  return { review: { ...review, findings: review.findings.map(f => ({ ...f, n: moved.get(f.n) ?? f.n })) }, moved }
 }

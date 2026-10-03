@@ -4,6 +4,7 @@ import { TODO_TOOL, TOOL } from './config'
 import { rewriteDraft } from './draft'
 import { approvePr, postReview } from './github'
 import { flipMode } from './mode'
+import { renumber } from './order'
 import type { Ports } from './ports'
 import { changeFinding, setStatus } from './review'
 
@@ -206,4 +207,15 @@ export async function confirmStep(p: ViewPorts & Pick<Ports, 'review' | 'notice'
   const failed = await approvePr(p, review.pr)
   await p.notice.update(() => (failed === undefined ? `Approved ${review.pr}.` : `Not approved: ${failed}`))
   await backToList(p)
+}
+
+/** Once a review round ends, numbers its rows top to bottom; a finding that is open keeps showing. */
+export async function numberRows(p: Pick<Ports, 'review' | 'view'>) {
+  const current = await p.review.get()
+  if (current === null) {
+    return
+  }
+  const { review, moved } = renumber(current)
+  await p.review.update(() => review)
+  await p.view.update(view => (view.kind === 'finding' ? { ...view, n: moved.get(view.n) ?? view.n } : view))
 }

@@ -54,8 +54,8 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
   }
   const { open, pending, done } = counts(review)
   const shown = blocks(review)
-  // The first nine rows, in the order shown, open with their digit.
-  const order = shown.flatMap(block => block.sections.flatMap(section => section.rows.map(row => row.finding.n)))
+  // Every number gets the same width, so the rows line up.
+  const numberWidth = `#${review.findings.reduce((max, f) => Math.max(max, f.n), 0)}`.length + 1
   const rounds = roundSummaries(review)
   const step = isReviewing ? null : nextStep(review)
 
@@ -118,17 +118,15 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
               {section.rows.map(({ finding, isGrey }) => {
                 const tags = [statusTag(finding.status), outcomeTag(finding)].filter(tag => tag !== null)
                 // The tags sit after the title, so the title gives up their width.
-                const width = columns - 3 - tags.reduce((sum, tag) => sum + tag.text.length + 2, 0)
-                const place = order.indexOf(finding.n)
+                const width = columns - numberWidth - tags.reduce((sum, tag) => sum + tag.text.length + 2, 0)
 
                 return (
                   <Box key={`row-${finding.n}`} flexDirection="row">
                     <Button
                       key={`f-${finding.n}`}
-                      label={findingLabel(finding, width)}
+                      label={`${`#${finding.n}`.padEnd(numberWidth)}${findingLabel(finding, width)}`}
                       plain
                       dimColor={isGrey}
-                      hotkey={place < 9 ? String(place + 1) : undefined}
                       hover={{ color: 'cyan' }}
                       onPress={() => actions.open(finding.n)}
                     />
