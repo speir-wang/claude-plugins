@@ -1,9 +1,10 @@
-import type { FindingStatus, Group, Incoming, ReviewInput } from '../types'
+import type { FindingStatus, Group, Incoming, Outcome, Review, ReviewInput } from '../types'
 
 import { startFix } from './actions'
 
 import { TOOL_NAME } from './config'
 import { pickMode } from './mode'
+import { applyOutcome, checkLine, toCheck } from './recheck'
 import type { Ports } from './ports'
 import { currentRound, newReview, nextRound, readFinding, setStatus, skipGroup } from './review'
 
@@ -49,6 +50,19 @@ export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'toolN
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
+/** What a new round tells Claude: the findings to check, and where to review from. One line. */
+function recheckAnswer(review: Review): string {
+  const round = currentRound(review)
+  const since = review.rounds.at(-2)?.head ?? ''
+  const checks = toCheck(review).map(checkLine)
+  const todo =
+    checks.length === 0
+      ? 'No findings to check.'
+      : `Check each of these and record it with "outcome": ${checks.join('; ')}.`
+
+  return `Round ${round} of ${review.pr} started. ${todo} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add".`
+}
+
 /** Opens a review, or the next round of the same one. */
 async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   const pr = typeof input.pr === 'string' ? input.pr.trim() : ''
@@ -67,7 +81,8 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
       return { text: `Round ${currentRound(current)} of ${pr} is open. Record findings with "add".` }
     }
     const next = await p.review.update(review => (review === null ? review : nextRound(review, head)))
-    return { text: `Round ${next === null ? 1 : currentRound(next)} of ${pr} started.` }
+    await p.isChanged.update(() => true)
+    return next === null ? fail('No review is open.') : { text: recheckAnswer(next) }
   }
   const mode = pickMode(pr, input.mode)
   if (current !== null && current.findings.length > 0) {
@@ -78,6 +93,24 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   await p.review.update(() => newReview(pr, mode, head))
 
   return { text: `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).` }
+}
+
+const OUTCOMES: Outcome[] = ['addressed', 'wrong', 'missed']
+
+/** "outcome": a re-check result for one finding. */
+async function recordOutcome(p: ToolPorts, review: Review, input: ReviewInput): Promise<ToolAnswer> {
+  const { number, outcome } = input
+  if (typeof number !== 'number' || !OUTCOMES.includes(outcome as Outcome)) {
+    return fail('"number" and "outcome" ("addressed", "wrong" or "missed") are needed.')
+  }
+  const checked = applyOutcome(review, number, outcome as Outcome, typeof input.note === 'string' ? input.note : '')
+  if (typeof checked === 'string') {
+    return fail(checked)
+  }
+  await p.review.update(() => checked)
+  await p.isChanged.update(() => true)
+
+  return { text: `#${number}: ${outcome === 'addressed' ? 'addressed' : outcome === 'wrong' ? 'addressed wrongly' : 'not addressed'}` }
 }
 
 const STATUSES: FindingStatus[] = ['open', 'fixing', 'fixed', 'wontfix']
@@ -130,7 +163,7 @@ export async function runTool(p: ToolPorts, input: ReviewInput): Promise<ToolAns
   if (input.action === 'start') {
     return start(p, input)
   }
-  if (input.action !== 'add' && input.action !== 'skipped' && input.action !== 'set-status') {
+  if (input.action !== 'add' && input.action !== 'skipped' && input.action !== 'set-status' && input.action !== 'outcome') {
     return fail('Unknown action. Use "start", "add", "skipped", "outcome" or "set-status".')
   }
   const waiting = await p.incoming.get()
@@ -152,6 +185,9 @@ export async function runTool(p: ToolPorts, input: ReviewInput): Promise<ToolAns
   }
   if (input.action === 'set-status') {
     return changeStatus(p, input)
+  }
+  if (input.action === 'outcome') {
+    return recordOutcome(p, review, input)
   }
   const group = input.group
   if (group !== 'standards' && group !== 'spec') {

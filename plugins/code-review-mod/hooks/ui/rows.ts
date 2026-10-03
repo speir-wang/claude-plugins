@@ -53,3 +53,17 @@ export function statusTag(status: FindingStatus): { text: string; color: 'yellow
 
   return tags[status]
 }
+
+/** The re-check's answer after a row, when there is one. */
+export function outcomeTag(finding: Finding): { text: string; color: 'yellow' | 'green' | 'red' } | null {
+  if (finding.outcome === undefined) {
+    return null
+  }
+  const tags = {
+    addressed: { text: '✅ addressed', color: 'green' },
+    wrong: { text: '⚠️ addressed wrongly', color: 'yellow' },
+    missed: { text: '❌ not addressed', color: 'red' },
+  } as const
+
+  return tags[finding.outcome]
+}

@@ -565,3 +565,47 @@ test('a review with no findings yet is replaced without asking', async ($, on) =
   expect(shown).toMatch('acme/shop#7')
   expect(shown).not.toMatch('Replace the review')
 })
+
+const HEAD2 = 'b'.repeat(40)
+
+test('Re-check on your PR: the button asks Claude, start lists what to check, outcomes and new problems show by round', async ($, on) => {
+  const w = world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { ...FINDING, title: 'Skip me' })
+  await review($, { action: 'set-status', number: 1, status: 'fixing' })
+  await review($, { action: 'set-status', number: 2, status: 'wontfix' })
+
+  const drawn = await pane($)
+  await drawn.press({ key: 'recheck' })
+  expect(w.submitted).toHaveLength(1)
+  expect(w.submitted[0]).toMatch('Re-check')
+  expect(w.submitted[0]).toMatch('feature')
+
+  const started = await review($, { action: 'start', pr: 'feature', head: HEAD2 })
+  expect(started.text).toMatch('#1 src/app.ts:12 Name the magic number')
+  expect(started.text).not.toMatch('Skip me')
+  expect(started.text).toMatch(HEAD.slice(0, 7))
+  expect(started.text.includes('\n')).toBe(false)
+
+  expect((await review($, { action: 'outcome', number: 2, outcome: 'addressed' })).isError).toBe(true)
+  expect((await review($, { action: 'outcome', number: 1, outcome: 'wrong', note: 'Still a bare number' })).isError).toBe(false)
+  await review($, { ...FINDING, title: 'A regression', score: 9, weight: 'must' })
+
+  const shown = (await texts(drawn)).join('\n')
+  expect(shown).toMatch('Round 1 · 2 found')
+  expect(shown).toMatch('Round 2 · ✅ 0  ⚠️ 1  ❌ 0 · 1 new')
+  expect(shown).toMatch('⚠️ addressed wrongly')
+  expect(shown).toMatch('New in round 2')
+  const labels = (await drawn.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  expect(labels.findIndex(l => l.includes('A regression'))).toBeGreaterThan(labels.findIndex(l => l.includes('Skip me')))
+})
+
+test('the same head again does not open another round', async ($, on) => {
+  world(on)
+  await startMine($)
+  const again = await review($, { action: 'start', pr: 'feature', head: HEAD })
+
+  expect(again.text).toMatch('Round 1')
+  expect(await paneText($)).not.toMatch('Round 2')
+})

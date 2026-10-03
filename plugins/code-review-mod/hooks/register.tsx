@@ -11,6 +11,7 @@ import {
   openFinding,
   keepReview,
   pickEvent,
+  recheck,
   replaceReview,
   rewrite,
   saveEdit,
@@ -152,6 +153,7 @@ export const register: Register = on => {
         submit: () => showSubmit(ports($)),
         replace: () => replaceReview(ports($)),
         keep: () => keepReview(ports($)),
+        recheck: () => recheck(ports($)),
       },
     )
   })

@@ -43,6 +43,8 @@ export type Finding = {
   outcome?: Outcome
   /** One line on why the outcome is what it is. */
   outcomeNote?: string
+  /** The re-check round that gave the outcome. */
+  outcomeRound?: number
 }
 
 /** One review pass: the first review, then one per re-check. */
@@ -54,8 +56,8 @@ export type Review = {
   mode: Mode
   rounds: Round[]
   findings: Finding[]
-  /** Groups that did not run in the latest round, with why. */
-  skipped: { group: Group; reason: string }[]
+  /** Groups that did not run, with why, by round. */
+  skipped: { group: Group; reason: string; round: number }[]
 }
 
 /** A review of another PR that came in while one was showing. */

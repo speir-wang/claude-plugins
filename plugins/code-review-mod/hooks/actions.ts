@@ -175,3 +175,11 @@ export async function replaceReview(p: Pick<Ports, 'review' | 'incoming'> & View
 export async function keepReview(p: Pick<Ports, 'incoming'>) {
   await p.incoming.update(waiting => (waiting === null ? null : { ...waiting, answer: 'keep' }))
 }
+
+/** The Re-check button: asks Claude to re-check, the same as saying it. */
+export async function recheck(p: Pick<Ports, 'review' | 'submit'>) {
+  const review = await p.review.get()
+  if (review !== null) {
+    await p.submit(`Re-check the code review of ${review.pr}: call ${TOOL} "start" with pr "${review.pr}" and the current HEAD, then follow its answer.`)
+  }
+}

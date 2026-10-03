@@ -12,7 +12,7 @@ export function currentRound(review: Review): number {
 
 /** Starts the next round from `head`. */
 export function nextRound(review: Review, head: string): Review {
-  return { ...review, rounds: [...review.rounds, { n: currentRound(review) + 1, head }], skipped: [] }
+  return { ...review, rounds: [...review.rounds, { n: currentRound(review) + 1, head }] }
 }
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
@@ -53,7 +53,9 @@ export function readFinding(input: Record<string, unknown>, review: Review): Fin
 
 /** Marks a group as not run this round; a later call for the same group replaces the reason. */
 export function skipGroup(review: Review, group: Group, reason: string): Review {
-  return { ...review, skipped: [...review.skipped.filter(s => s.group !== group), { group, reason }] }
+  const round = currentRound(review)
+
+  return { ...review, skipped: [...review.skipped.filter(s => s.group !== group || s.round !== round), { group, reason, round }] }
 }
 
 /** Changes one finding. */
