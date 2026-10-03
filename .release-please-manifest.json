@@ -1,3 +1,4 @@
 {
-  "plugins/todo-commits": "1.0.1"
+  "plugins/todo-commits": "1.0.1",
+  "plugins/code-review-mod": "0.0.0"
 }

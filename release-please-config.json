@@ -25,6 +25,17 @@
           "jsonpath": "$.version"
         }
       ]
+    },
+    "plugins/code-review-mod": {
+      "release-type": "simple",
+      "component": "code-review-mod",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }

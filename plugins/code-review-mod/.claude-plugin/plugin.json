@@ -1,0 +1,12 @@
+{
+  "name": "code-review-mod",
+  "version": "0.0.0",
+  "description": "A review panel for the mattpocock-skills code-review skill: scored findings, fixes as todos, and comment drafts posted as one GitHub review",
+  "author": {
+    "name": "He Wang",
+    "url": "https://github.com/speir-wang"
+  },
+  "homepage": "https://github.com/speir-wang/claude-plugins/tree/main/plugins/code-review-mod",
+  "repository": "https://github.com/speir-wang/claude-plugins",
+  "types": "./types/index.d.ts"
+}

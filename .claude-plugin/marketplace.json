@@ -10,6 +10,13 @@
       "author": { "name": "He Wang" },
       "category": "productivity",
       "source": "./plugins/todo-commits"
+    },
+    {
+      "name": "code-review-mod",
+      "description": "A review panel for the code-review skill: scored findings, fixes as todos, and comment drafts posted as one GitHub review",
+      "author": { "name": "He Wang" },
+      "category": "productivity",
+      "source": "./plugins/code-review-mod"
     }
   ]
 }
