@@ -4,11 +4,11 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, Todo, TodoStatus } from '../types'
 
 import { COMMIT_RULE, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
-import { missingCommits, newCommits, readEarlier, readHead, readPlace } from './git'
 import { changeTodos } from './state'
 import type { Ports } from './state'
 import { backToList, showCommit, showWorking, toggleFile } from './commit-view'
 import { tidyTitle } from './model'
+import { afterBash, beforeTodosOpen, linkNewCommits, syncPlace } from './sync'
 import { earlierSummary, fit, progressBar, rowLook, toolRowLine } from './ui/rows'
 import type { ToolInput } from './ui/rows'
 import { addTodos, fromTodoWrite, linkCommits, listText, pickTarget, progress, renameTodo, setStatus as withStatus } from './todo-list'
@@ -56,50 +56,9 @@ async function isPaneOpen($: $): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === TODO_PANE)
 }
 
-/**
- * Follows the repo and branch: on a change, loads that branch's saved list.
- * Answers true when the place changed, so HEAD's move is not read as new commits.
- */
-async function syncPlace($: $): Promise<boolean> {
-  const now = await readPlace(ports($))
-  const was = await read($, place)
-  if (now?.key === was?.key) {
-    return false
-  }
-  const saved = now === null ? undefined : await $.store.get(`todos:${now.key}`)
-  await update($, place, () => now)
-  if (was === null && !Array.isArray(saved)) {
-    // First look in this session with nothing saved yet: keep the list in hand.
-    await changeTodos(ports($), list => list)
-  } else {
-    await update($, todos, () => (Array.isArray(saved) ? (saved as Todo[]) : []))
-  }
-  await update($, lastActiveId, () => '')
-  const at = await readHead(ports($))
-  await update($, head, () => at)
-  await refreshEarlier($)
-  await refreshDropped($)
-
-  return true
-}
-
 /** Opens (or retitles) the todo pane. */
 async function openPane($: $, args: { title: string; closeOnEscape?: true }) {
   await $.ui.open({ id: TODO_PANE, ...args })
-}
-
-/** Reads the earlier section for this branch. */
-async function refreshEarlier($: $) {
-  const here = await read($, place)
-  const found = await readEarlier(ports($), here?.branch)
-  await update($, earlier, () => found)
-}
-
-/** Notes which linked commits are no longer on the branch. */
-async function refreshDropped($: $) {
-  const hashes = (await read($, todos)).flatMap(todo => todo.commits)
-  const gone = await missingCommits(ports($), hashes)
-  await update($, dropped, () => gone)
 }
 
 /** Opens the todo pane the first time Claude makes a list. */
@@ -114,27 +73,6 @@ async function setStatus($: $, id: string, status: TodoStatus | 'deleted', title
   if (status === 'in_progress') {
     await update($, lastActiveId, () => id)
   }
-}
-
-/** Gives every commit made since the last look to the active todo; true when HEAD moved. */
-async function linkNewCommits($: $): Promise<boolean> {
-  const before = await read($, head)
-  const after = await readHead(ports($))
-  if (after === '' || after === before) {
-    return false
-  }
-  await update($, head, () => after)
-
-  const hashes = await newCommits(ports($), before, after)
-  const list = await read($, todos)
-  const target = pickTarget(list, await read($, lastActiveId))
-  if (target === '' || hashes.length === 0) {
-    return true
-  }
-
-  await changeTodos(ports($), current => linkCommits(current, target, hashes))
-
-  return true
 }
 
 type TodosInput = ToolInput
@@ -168,7 +106,7 @@ async function runTodosTool($: $, input: TodosInput): Promise<TodosAnswer> {
     }
     if (input.action === 'done') {
       // A commit made just before "done" still belongs to this todo.
-      await linkNewCommits($)
+      await linkNewCommits(ports($))
     }
     await setStatus($, picked.id, input.action === 'start' ? 'in_progress' : 'completed')
     await update($, lastActiveId, () => picked.id)
@@ -215,7 +153,7 @@ export const register: Register = on => {
         required: ['action'],
       },
     })
-    await syncPlace($)
+    await syncPlace(ports($))
     spinner?.cancel()
     spinner = $.clock.every(SPIN_MS, () => {
       void (async () => {
@@ -234,9 +172,7 @@ export const register: Register = on => {
       await $.ui.close({ id: TODO_PANE })
       return { text: 'Todo panel closed. Claude no longer commits after each todo.' }
     }
-    await syncPlace($)
-    await refreshEarlier($)
-    await refreshDropped($)
+    await beforeTodosOpen(ports($))
     await openPane($, { title: 'Todos' })
 
     if (/^clear$/i.test(e.args.trim())) {
@@ -336,11 +272,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    const isMoved = !(await syncPlace($)) && (await linkNewCommits($))
-    if (isMoved) {
-      await refreshEarlier($)
-      await refreshDropped($)
-    }
+    await afterBash(ports($))
 
     return ran
   })
