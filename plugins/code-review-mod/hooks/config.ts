@@ -10,6 +10,9 @@ export const TOOL = `mcp__code-review-mod__${TOOL_NAME}`
 /** todo-commits' tool: "Fix it" adds a todo through it when it is there. */
 export const TODO_TOOL = 'mcp__todo-commits__todos'
 
+/** Where a session's review is saved for `claude --resume`: this, then the session id. */
+export const SAVED = 'review:'
+
 /** Saved reviews older than this are deleted when a session starts. */
 export const KEEP_MS = 7 * 24 * 60 * 60 * 1000
 

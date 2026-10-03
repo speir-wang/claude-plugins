@@ -776,3 +776,49 @@ test('when a turn that changed the review ends, the review tab comes to the fron
   await $.turn.complete(turnEnd())
   expect(w.opened.filter(o => o.focus === true)).toHaveLength(1)
 })
+
+const DAY = 24 * 60 * 60 * 1000
+
+test('the review is saved under this session only, and comes back when that session resumes', async ($, on) => {
+  const w = world(on)
+  await startMine($)
+  await review($, FINDING)
+
+  const saved = w.store['review:s1'] as { savedAt: number; review: { findings: unknown[] } }
+  expect(saved.savedAt).toBe(1_000_000)
+  expect(saved.review.findings).toHaveLength(1)
+  expect(Object.keys(w.store).filter(k => k.startsWith('review:'))).toEqual(['review:s1'])
+})
+
+test('a resumed session gets its review back and the panel opens', async ($, on) => {
+  const first = { savedAt: 1_000_000 - DAY, review: { pr: 'feature', mode: 'mine', rounds: [{ n: 1, head: HEAD }], findings: [], skipped: [] } }
+  const w = world(on, { 'review:s1': first })
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  expect(await paneText($)).toMatch('feature')
+  expect(w.opened.map(o => o.id)).toContain('code-review-mod')
+})
+
+test('another session never sees it, and saved reviews older than 7 days are deleted', async ($, on) => {
+  const old = { savedAt: 1_000_000 - 8 * DAY, review: { pr: 'old', mode: 'mine', rounds: [{ n: 1, head: HEAD }], findings: [], skipped: [] } }
+  const recent = { ...old, savedAt: 1_000_000 - DAY, review: { ...old.review, pr: 'recent' } }
+  const w = world(on, { 'review:old': old, 'review:other': recent, 'todos:x': [] })
+  w.sessionId = 's2'
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  expect(await paneText($)).toMatch('No review yet')
+  expect(Object.keys(w.store).sort()).toEqual(['review:other', 'todos:x'])
+})
+
+test('/clear starts the next session with no review', async ($, on) => {
+  world(on)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }) as never)
+  await startMine($)
+  await review($, FINDING)
+
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+
+  expect(await paneText($)).toMatch('No review yet')
+})

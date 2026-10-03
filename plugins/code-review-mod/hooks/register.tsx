@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ReviewInput } from '../types'
+import type { Review, ReviewInput } from '../types'
 
 import {
   askAbout,
@@ -24,7 +24,7 @@ import {
   togglePending,
   wontFix,
 } from './actions'
-import { PANE, PANE_TITLE, RULE, TOOL, recheckNote } from './config'
+import { KEEP_MS, PANE, PANE_TITLE, RULE, SAVED, TOOL, recheckNote } from './config'
 import { prLinks } from './mode'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
@@ -42,6 +42,11 @@ const isChanged = atom({ plugin: 'code-review-mod', key: 'isChanged' } as const,
 const notice = atom({ plugin: 'code-review-mod', key: 'notice' } as const, '')
 
 type $ = EngineInterface
+
+/** A review saved for `claude --resume`. */
+function isSaved(value: unknown): value is { savedAt: number; review: Review } {
+  return typeof value === 'object' && value !== null && 'savedAt' in value && typeof value.savedAt === 'number' && 'review' in value
+}
 
 /** The engine's calls the other modules use, built for one event (see Ports). */
 function ports($: $): Ports {
@@ -62,7 +67,15 @@ function ports($: $): Ports {
       const ran = (await $.tool.call({ tool, ...input } as never)) as { result?: unknown; isError?: boolean }
       return ran.isError === true || ran.result === undefined ? undefined : String(ran.result)
     },
-    review: { get: () => read($, review), update: change => update($, review, change) },
+    review: {
+      get: () => read($, review),
+      // Every change is saved under this session's id, so `claude --resume` brings it back.
+      update: async change => {
+        const changed = await update($, review, change)
+        await $.store.set(`${SAVED}${await $.session.id()}`, { savedAt: await $.clock.now(), review: changed })
+        return changed
+      },
+    },
     incoming: { get: () => read($, incoming), update: change => update($, incoming, change) },
     view: { get: () => read($, view), update: change => update($, view, change) },
     isChanged: { get: () => read($, isChanged), update: change => update($, isChanged, change) },
@@ -70,10 +83,26 @@ function ports($: $): Ports {
   }
 }
 
+/** Deletes saved reviews older than a week, and brings back this session's own after a resume. */
+async function restore($: $) {
+  const now = await $.clock.now()
+  const id = await $.session.id()
+  for (const key of (await $.store.keys()).filter(k => k.startsWith(SAVED))) {
+    const saved = await $.store.get(key)
+    if (!isSaved(saved) || now - saved.savedAt > KEEP_MS) {
+      await $.store.delete(key)
+    } else if (key === `${SAVED}${id}` && (await read($, review)) === null) {
+      await update($, review, () => saved.review)
+      await ports($).openPane()
+    }
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await $.tool.register(TOOL_SPEC)
+    await restore($)
 
     return started
   })
@@ -121,6 +150,17 @@ export const register: Register = on => {
     }
 
     return { sections: [...composed.sections, { id: 'code-review-mod:rule', text: RULE, scope: 'session' }] }
+  })
+
+  // /clear starts a new session: one review per session, so the panel starts empty.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') {
+      await update($, review, () => null)
+      await update($, incoming, () => null)
+      await update($, view, () => ({ kind: 'list' }))
+    }
+
+    return next(e)
   })
 
   on('ui.close', async ($, e, next) => {
