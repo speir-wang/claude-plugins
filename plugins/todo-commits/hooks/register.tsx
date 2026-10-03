@@ -5,6 +5,7 @@ import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, To
 
 import { COMMIT_RULE, MAX_EARLIER, MAX_NEW_COMMITS, MAX_UNTRACKED, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL, TOOL_NAME } from './config'
 import { splitDiff } from './diff'
+import { addTodos, fromTodoWrite, linkCommits, listText, pickTarget, progress, renameTodo, setStatus as withStatus } from './todo-list'
 
 const todos = atom({ plugin: 'todo-commits', key: 'todos' } as const, [])
 const head = atom({ plugin: 'todo-commits', key: 'head' } as const, '')
@@ -139,11 +140,7 @@ async function openIfNew($: $, hadTodos: boolean) {
 }
 
 async function setStatus($: $, id: string, status: TodoStatus | 'deleted', title?: string) {
-  await changeTodos($, list =>
-    status === 'deleted'
-      ? list.filter(todo => todo.id !== id)
-      : list.map(todo => (todo.id === id ? { ...todo, status, title: title ?? todo.title } : todo)),
-  )
+  await changeTodos($, list => withStatus(list, id, status, title))
   if (status === 'in_progress') {
     await update($, lastActiveId, () => id)
   }
@@ -162,19 +159,12 @@ async function linkNewCommits($: $): Promise<boolean> {
   const listed = await git($, ['rev-list', '--reverse', `--max-count=${MAX_NEW_COMMITS}`, ...range])
   const hashes = (listed ?? after).split('\n').filter(Boolean)
   const list = await read($, todos)
-  const target =
-    list.find(todo => todo.status === 'in_progress')?.id ?? (await read($, lastActiveId))
+  const target = pickTarget(list, await read($, lastActiveId))
   if (target === '' || hashes.length === 0) {
     return true
   }
 
-  await changeTodos($, current =>
-    current.map(todo =>
-      todo.id === target
-        ? { ...todo, commits: [...todo.commits, ...hashes.filter(h => !todo.commits.includes(h))] }
-        : todo,
-    ),
-  )
+  await changeTodos($, current => linkCommits(current, target, hashes))
 
   return true
 }
@@ -328,13 +318,6 @@ type TodosInput = { action?: unknown; titles?: unknown; number?: unknown }
 
 type TodosAnswer = { text: string; isError?: true }
 
-/** The numbered list, as the model reads it. */
-function listText(list: Todo[]): string {
-  return list.length === 0
-    ? 'The todo list is empty.'
-    : list.map((todo, i) => `${i + 1}. [${todo.status}] ${todo.title}`).join('\n')
-}
-
 /**
  * Serves the mod's own todo tool. "add" answers with the whole numbered list,
  * so the model learns the numbers; the rest answer in one line.
@@ -352,13 +335,7 @@ async function runTodosTool($: $, input: TodosInput): Promise<TodosAnswer> {
       return { text: 'Nothing added: "titles" needs at least one title.', isError: true }
     }
     const stamp = await $.clock.now()
-    const added: Todo[] = titles.map((title, i) => ({
-      id: `m${stamp}-${i}`,
-      title: title.trim(),
-      status: 'pending',
-      commits: [],
-    }))
-    await changeTodos($, current => [...current, ...added])
+    await changeTodos($, current => addTodos(current, titles, stamp))
 
     return { text: listText(await read($, todos)) }
   }
@@ -373,7 +350,7 @@ async function runTodosTool($: $, input: TodosInput): Promise<TodosAnswer> {
     await setStatus($, picked.id, input.action === 'start' ? 'in_progress' : 'completed')
     await update($, lastActiveId, () => picked.id)
     const now = await read($, todos)
-    const done = now.filter(todo => todo.status === 'completed').length
+    const { done } = progress(now)
 
     return input.action === 'start'
       ? { text: `Started ${position}: ${picked.title}` }
@@ -459,7 +436,7 @@ export const register: Register = on => {
     // The row shows the typed words at once; the tidy title replaces them when it comes.
     const tidy = await tidyTitle($, title)
     if (added !== undefined && tidy !== undefined) {
-      await changeTodos($, list => list.map(todo => (todo.id === added.id ? { ...todo, title: tidy } : todo)))
+      await changeTodos($, list => renameTodo(list, added.id, tidy))
     }
 
     return { text: `Added todo ${count}: ${tidy ?? title}` }
@@ -510,9 +487,8 @@ export const register: Register = on => {
     if (e.status !== undefined) {
       await setStatus($, e.taskId, e.status, e.subject)
     } else if (e.subject !== undefined) {
-      await changeTodos($, list =>
-        list.map(todo => (todo.id === e.taskId ? { ...todo, title: e.subject ?? todo.title } : todo)),
-      )
+      const subject = e.subject
+      await changeTodos($, list => renameTodo(list, e.taskId, subject))
     }
 
     return ran
@@ -524,12 +500,7 @@ export const register: Register = on => {
       return ran
     }
     const previous = await read($, todos)
-    const nextList: Todo[] = e.todos.map(item => ({
-      id: item.content,
-      title: item.content,
-      status: item.status,
-      commits: previous.find(todo => todo.id === item.content)?.commits ?? [],
-    }))
+    const nextList = fromTodoWrite(previous, e.todos)
     await changeTodos($, () => nextList)
     const active = nextList.find(todo => todo.status === 'in_progress')
     if (active !== undefined) {
@@ -660,7 +631,7 @@ export const register: Register = on => {
     const columns = e.props.bodyColumns ?? 60
     // icon + space, "12: ", title, space, a 9-wide hash or tag slot
     const titleWidth = Math.max(8, columns - 2 - 4 - 1 - 9 - 1)
-    const done = list.filter(todo => todo.status === 'completed').length
+    const { done } = progress(list)
     const barLength = Math.min(10, Math.max(list.length, 1))
     const filled = list.length === 0 ? 0 : Math.round((done / list.length) * barLength)
 
