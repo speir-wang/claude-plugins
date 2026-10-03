@@ -10,7 +10,8 @@ export type Section = {
   rows: Row[]
 }
 
-const LABELS = { standards: 'Standards', spec: 'Spec', comment: 'Your comments' } as const
+/** Each section's name, as the panel and the tool's answers say it. */
+export const GROUP_LABELS = { standards: 'Standards', spec: 'Spec', comment: 'Your comments' } as const
 
 /**
  * Splits findings into the Standards and Spec sections, each sorted by score
@@ -27,7 +28,7 @@ export function groupFindings(findings: Finding[], skipped: { group: Group; reas
     const skip = skipped.find(s => s.group === group)
     const note = rows.length > 0 ? null : skip === undefined ? 'nothing found' : `skipped, ${skip.reason}`
 
-    return { group, label: LABELS[group], note, rows }
+    return { group, label: GROUP_LABELS[group], note, rows }
   }
   const comments = section('comment')
 

@@ -5,6 +5,7 @@ import { rewriteDraft } from './draft'
 import { approvePr, postReview } from './github'
 import { flipMode } from './mode'
 import { renumber } from './order'
+import { changeReview, findingOf } from './ports'
 import type { Ports } from './ports'
 import { changeFinding, setStatus } from './review'
 
@@ -25,7 +26,7 @@ export async function backToList(p: ViewPorts) {
 
 /** Flips the review between your PR and their PR. */
 export async function switchMode(p: Pick<Ports, 'review'>) {
-  await p.review.update(review => (review === null ? review : { ...review, mode: flipMode(review.mode) }))
+  await changeReview(p, review => ({ ...review, mode: flipMode(review.mode) }))
 }
 
 /** The prompt that asks Claude to fix every finding on the fix list, in one commit. */
@@ -48,9 +49,7 @@ export function fixAllPrompt(findings: Finding[]): string {
 
 /** Add to fix list / Remove from fix list. Nothing is fixed until Fix all. */
 export async function toggleQueued(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
-  await p.review.update(review =>
-    review === null ? review : changeFinding(review, n, f => ({ ...f, status: f.status === 'queued' ? 'open' : 'queued' })),
-  )
+  await changeReview(p, review => changeFinding(review, n, f => ({ ...f, status: f.status === 'queued' ? 'open' : 'queued' })))
   await backToList(p)
 }
 
@@ -59,7 +58,7 @@ export async function fixAll(p: Pick<Ports, 'review' | 'submit'> & ViewPorts) {
   const queued = (await p.review.get())?.findings.filter(f => f.status === 'queued') ?? []
   if (queued.length > 0) {
     const fixing = new Set(queued.map(f => f.n))
-    await p.review.update(r => (r === null ? r : { ...r, findings: r.findings.map(f => (fixing.has(f.n) ? { ...f, status: 'fixing' as const } : f)) }))
+    await changeReview(p, r => ({ ...r, findings: r.findings.map(f => (fixing.has(f.n) ? { ...f, status: 'fixing' as const } : f)) }))
     await p.submit(fixAllPrompt(queued))
   }
   await backToList(p)
@@ -67,13 +66,13 @@ export async function fixAll(p: Pick<Ports, 'review' | 'submit'> & ViewPorts) {
 
 /** The Won't fix button. */
 export async function wontFix(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
-  await p.review.update(review => (review === null ? review : setStatus(review, n, 'wontfix')))
+  await changeReview(p, review => setStatus(review, n, 'wontfix'))
   await backToList(p)
 }
 
 /** The Ask Claude button: the finding goes in the prompt box, the user writes the question. */
 export async function askAbout(p: Pick<Ports, 'review' | 'fill'>, n: number) {
-  const finding = (await p.review.get())?.findings.find(f => f.n === n)
+  const finding = await findingOf(p, n)
   if (finding !== undefined) {
     await p.fill(`About review finding #${n} (${finding.title}, ${finding.file}:${finding.line}): `)
   }
@@ -81,7 +80,7 @@ export async function askAbout(p: Pick<Ports, 'review' | 'fill'>, n: number) {
 
 /** The Drop button: skip a finding on their PR. */
 export async function drop(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
-  await p.review.update(review => (review === null ? review : setStatus(review, n, 'dropped')))
+  await changeReview(p, review => setStatus(review, n, 'dropped'))
   await backToList(p)
 }
 
@@ -94,8 +93,8 @@ export async function showInput(p: Pick<Ports, 'view' | 'notice'>, n: number, in
 /** Saves an edited draft text. */
 export async function saveEdit(p: Pick<Ports, 'review' | 'view'>, n: number, text: string) {
   if (text.trim() !== '') {
-    await p.review.update(review =>
-      review === null ? review : changeFinding(review, n, f => ({ ...f, draft: { text: text.trim(), hasCode: f.draft?.hasCode ?? f.suggested.trim() !== '' } })),
+    await changeReview(p, review =>
+      changeFinding(review, n, f => ({ ...f, draft: { text: text.trim(), hasCode: f.draft?.hasCode ?? f.suggested.trim() !== '' } })),
     )
   }
   await p.view.update(() => ({ kind: 'finding', n }))
@@ -103,7 +102,7 @@ export async function saveEdit(p: Pick<Ports, 'review' | 'view'>, n: number, tex
 
 /** Rewrites a draft from the user's note through Claude; on no answer the draft stays and the panel says so. */
 export async function rewrite(p: Pick<Ports, 'review' | 'view' | 'notice' | 'complete'>, n: number, note: string) {
-  const finding = (await p.review.get())?.findings.find(f => f.n === n)
+  const finding = await findingOf(p, n)
   if (finding === undefined) {
     return
   }
@@ -112,16 +111,14 @@ export async function rewrite(p: Pick<Ports, 'review' | 'view' | 'notice' | 'com
   if (draft === undefined) {
     await p.notice.update(() => 'Rewrite failed: Claude gave no usable answer. The draft is unchanged.')
   } else {
-    await p.review.update(review => (review === null ? review : changeFinding(review, n, f => ({ ...f, draft }))))
+    await changeReview(p, review => changeFinding(review, n, f => ({ ...f, draft })))
   }
   await p.view.update(view => (view.kind === 'finding' && view.n === n ? { kind: 'finding', n } : view))
 }
 
 /** Add to review / Remove from review: moves a draft in or out of the pending pile. Nothing is posted. */
 export async function togglePending(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
-  await p.review.update(review =>
-    review === null ? review : changeFinding(review, n, f => ({ ...f, status: f.status === 'pending' ? 'open' : 'pending' })),
-  )
+  await changeReview(p, review => changeFinding(review, n, f => ({ ...f, status: f.status === 'pending' ? 'open' : 'pending' })))
   await backToList(p)
 }
 
@@ -151,7 +148,7 @@ export async function submitReview(p: Pick<Ports, 'review' | 'view' | 'notice' |
     return
   }
   const posted = new Set(pending.map(f => f.n))
-  await p.review.update(r => (r === null ? r : { ...r, findings: r.findings.map(f => (posted.has(f.n) ? { ...f, status: 'posted' as const } : f)) }))
+  await changeReview(p, r => ({ ...r, findings: r.findings.map(f => (posted.has(f.n) ? { ...f, status: 'posted' as const } : f)) }))
   await p.notice.update(() => '')
   await backToList(p)
 }
@@ -198,7 +195,7 @@ export async function confirmStep(p: ViewPorts & Pick<Ports, 'review' | 'notice'
     return
   }
   if (view.step === 'create') {
-    await p.review.update(r => (r === null ? r : { ...r, hasPr: true }))
+    await changeReview(p, r => ({ ...r, hasPr: true }))
     await p.submit(`Create a GitHub PR for the branch ${review.pr}: push it, then run gh pr create with a short title and a description written from its commits.`)
     await backToList(p)
     return

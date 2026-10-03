@@ -1,5 +1,7 @@
 import type { Finding, FindingStatus, ReviewInput } from '../../types'
 
+import { OUTCOME_LABELS } from '../recheck'
+
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
 /** The icon, color and text of the one-line tool row. */
@@ -68,11 +70,12 @@ export function outcomeTag(finding: Finding): { text: string; color: 'yellow' | 
   if (finding.outcome === undefined) {
     return null
   }
-  const tags = {
-    addressed: { text: '✅ addressed', color: 'green' },
-    wrong: { text: '⚠️ addressed wrongly', color: 'yellow' },
-    missed: { text: '❌ not addressed', color: 'red' },
+  const looks = {
+    addressed: { icon: '✅', color: 'green' },
+    wrong: { icon: '⚠️', color: 'yellow' },
+    missed: { icon: '❌', color: 'red' },
   } as const
+  const { icon, color } = looks[finding.outcome]
 
-  return tags[finding.outcome]
+  return { text: `${icon} ${OUTCOME_LABELS[finding.outcome]}`, color }
 }

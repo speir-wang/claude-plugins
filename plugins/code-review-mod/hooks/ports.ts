@@ -1,6 +1,6 @@
 import type { ModelCompleteRequest, ModelCompleteResult } from 'claude-code'
 
-import type { Incoming, Review, View } from '../types'
+import type { Finding, Incoming, Review, View } from '../types'
 
 /** One value the plugin keeps in `$.state`, read and changed through two small calls. */
 export type Cell<T> = {
@@ -25,7 +25,17 @@ export type Ports = {
   review: Cell<Review | null>
   incoming: Cell<Incoming | null>
   view: Cell<View>
-  isChanged: Cell<boolean>
+  shouldFocus: Cell<boolean>
   isReviewing: Cell<boolean>
   notice: Cell<string>
+}
+
+/** Changes the review shown; nothing happens while there is none. Answers the new review. */
+export async function changeReview(p: Pick<Ports, 'review'>, change: (review: Review) => Review): Promise<Review | null> {
+  return p.review.update(review => (review === null ? review : change(review)))
+}
+
+/** One finding of the review shown, by its number. */
+export async function findingOf(p: Pick<Ports, 'review'>, n: unknown): Promise<Finding | undefined> {
+  return (await p.review.get())?.findings.find(f => f.n === n)
 }

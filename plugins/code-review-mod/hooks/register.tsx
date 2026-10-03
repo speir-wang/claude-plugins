@@ -39,7 +39,7 @@ import { drawEmptyResult, drawToolRow } from './ui/tool-row'
 const review = atom({ plugin: 'code-review-mod', key: 'review' } as const, null)
 const incoming = atom({ plugin: 'code-review-mod', key: 'incoming' } as const, null)
 const view = atom({ plugin: 'code-review-mod', key: 'view' } as const, { kind: 'list' })
-const isChanged = atom({ plugin: 'code-review-mod', key: 'isChanged' } as const, false)
+const shouldFocus = atom({ plugin: 'code-review-mod', key: 'shouldFocus' } as const, false)
 const isReviewing = atom({ plugin: 'code-review-mod', key: 'isReviewing' } as const, false)
 const notice = atom({ plugin: 'code-review-mod', key: 'notice' } as const, '')
 
@@ -90,7 +90,7 @@ function ports($: $): Ports {
       },
     },
     view: { get: () => read($, view), update: change => update($, view, change) },
-    isChanged: { get: () => read($, isChanged), update: change => update($, isChanged, change) },
+    shouldFocus: { get: () => read($, shouldFocus), update: change => update($, shouldFocus, change) },
     isReviewing: { get: () => read($, isReviewing), update: change => update($, isReviewing, change) },
     notice: { get: () => read($, notice), update: change => update($, notice, change) },
   }
@@ -144,8 +144,8 @@ export const register: Register = on => {
       await update($, isReviewing, () => false)
       await numberRows(ports($))
     }
-    if (e.agentId === undefined && (await read($, isChanged))) {
-      await update($, isChanged, () => false)
+    if (e.agentId === undefined && (await read($, shouldFocus))) {
+      await update($, shouldFocus, () => false)
       await ports($).openPane({ focus: true })
     }
 

@@ -1007,3 +1007,23 @@ test('on resume the Replace? question is asked again', async ($, on) => {
 
   expect(await paneText($)).toMatch('Replace the review of feature with acme/shop#7?')
 })
+
+test('a rewrite answered in plain words becomes the draft and keeps the code; a draft without code posts its text alone', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = '{"id": 1}'
+  const drawn = await openTheirs($)
+
+  w.rewrite = 'Would a named constant read better here?'
+  await drawn.press({ key: 'rewrite' })
+  await drawn.input({ key: 'rewrite-input', text: 'shorter' })
+  expect(await texts(drawn)).toContain('Would a named constant read better here?')
+  expect((await drawn.findAll({ type: 'Code' })).map(c => c.props.source)).toContain('const RETRY_MS = 3000')
+
+  w.rewrite = '{"text": "Name it?", "hasCode": false}'
+  await drawn.press({ key: 'rewrite' })
+  await drawn.input({ key: 'rewrite-input', text: 'drop the code' })
+  await drawn.press({ key: 'pending' })
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'post' })
+  expect(JSON.parse(w.stdin[POST]!).comments[0].body).toBe('Name it?')
+})

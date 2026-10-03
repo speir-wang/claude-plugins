@@ -2,6 +2,9 @@ import type { Finding, Outcome, Review } from '../types'
 
 import { changeFinding, currentRound } from './review'
 
+/** Each outcome in words, as the panel and the tool's answers say it. */
+export const OUTCOME_LABELS: Record<Outcome, string> = { addressed: 'addressed', wrong: 'addressed wrongly', missed: 'not addressed' }
+
 /**
  * The findings a re-check looks at: the ones you acted on in an earlier round.
  * On your PR that is "fix it" (fixing or fixed); on theirs, a posted comment.

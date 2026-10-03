@@ -1,9 +1,11 @@
-import type { Finding, FindingStatus, Group, Incoming, Outcome, Review, ReviewInput } from '../types'
+import type { Finding, FindingStatus, Group, Outcome, Review, ReviewInput } from '../types'
 
 import { SCORE_SCALE, TOOL_NAME } from './config'
 import { hasPr, readMyComments } from './github'
 import { pickMode, readPr } from './mode'
-import { applyOutcome, checkLine, toCheck } from './recheck'
+import { GROUP_LABELS } from './order'
+import { OUTCOME_LABELS, applyOutcome, checkLine, toCheck } from './recheck'
+import { changeReview, findingOf } from './ports'
 import type { Ports } from './ports'
 import { currentRound, newReview, nextRound, readFinding, setStatus, skipGroup } from './review'
 
@@ -45,7 +47,7 @@ export const TOOL_SPEC = {
 export type ToolAnswer = { text: string; isError?: true }
 
 /** What serving the tool needs. */
-export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'isReviewing' | 'run'>
+export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'shouldFocus' | 'isReviewing' | 'run'>
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
@@ -101,11 +103,11 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
     if (rebuilt !== null) {
       const fresh = keepUnposted(fromComments(pr, head, rebuilt), current)
       await p.review.update(() => fresh)
-      await p.isChanged.update(() => true)
+      await p.shouldFocus.update(() => true)
       return { text: recheckAnswer(fresh) }
     }
-    const next = await p.review.update(review => (review === null ? review : nextRound(review, head)))
-    await p.isChanged.update(() => true)
+    const next = await changeReview(p, review => nextRound(review, head))
+    await p.shouldFocus.update(() => true)
     return next === null ? fail('No review is open.') : { text: recheckAnswer(next) }
   }
   const mode = pickMode(pr, input.mode)
@@ -122,7 +124,7 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
     return { text: `${opening} The panel asks the user whether it replaces the one shown; go on as usual.` }
   }
   await p.review.update(() => fresh)
-  await p.isChanged.update(() => true)
+  await p.shouldFocus.update(() => true)
 
   return { text: opening }
 }
@@ -140,9 +142,9 @@ async function recordOutcome(p: ToolPorts, review: Review, input: ReviewInput): 
     return fail(checked)
   }
   await p.review.update(() => checked)
-  await p.isChanged.update(() => true)
+  await p.shouldFocus.update(() => true)
 
-  return { text: `#${number}: ${outcome === 'addressed' ? 'addressed' : outcome === 'wrong' ? 'addressed wrongly' : 'not addressed'}` }
+  return { text: `#${number}: ${OUTCOME_LABELS[outcome as Outcome]}` }
 }
 
 const STATUSES: FindingStatus[] = ['open', 'queued', 'fixing', 'fixed', 'wontfix']
@@ -150,7 +152,7 @@ const STATUSES: FindingStatus[] = ['open', 'queued', 'fixing', 'fixed', 'wontfix
 /** "set-status": "queued" is the Add to fix list button; "fixing" and "fixed" follow Claude's work. */
 async function changeStatus(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   const { number, status } = input
-  const finding = (await p.review.get())?.findings.find(f => f.n === number)
+  const finding = await findingOf(p, number)
   if (finding === undefined || typeof number !== 'number') {
     return fail(`No finding number ${String(number)}.`)
   }
@@ -158,34 +160,59 @@ async function changeStatus(p: ToolPorts, input: ReviewInput): Promise<ToolAnswe
     return fail('"status" must be "open", "queued", "fixing", "fixed" or "wontfix".')
   }
   if (status === 'queued') {
-    await p.review.update(r => (r === null ? r : setStatus(r, number, 'queued')))
+    await changeReview(p, r => setStatus(r, number, 'queued'))
     return { text: `#${number} is on the fix list. Don't fix it yet: the user fixes the list with Fix all.` }
   }
-  await p.review.update(r => (r === null ? r : setStatus(r, number, status as FindingStatus)))
+  await changeReview(p, r => setStatus(r, number, status as FindingStatus))
 
   return { text: `#${number} is ${status === 'wontfix' ? "won't fix" : status}.` }
 }
 
-/**
- * Records into the review waiting for the user's answer. Once they chose to
- * keep the old one, the new review's findings are let go, but Claude is told
- * all went well: the question only decides what the panel keeps.
- */
-async function recordIncoming(p: ToolPorts, input: ReviewInput, waiting: Incoming): Promise<ToolAnswer> {
-  if (input.action === 'skipped') {
-    const group = input.group === 'spec' ? 'spec' : 'standards'
-    await p.incoming.update(w => (w === null ? w : { ...w, review: skipGroup(w.review, group, typeof input.reason === 'string' ? input.reason : 'not run') }))
-    return { text: `${group === 'spec' ? 'Spec' : 'Standards'} skipped.` }
-  }
-  const finding = readFinding(input, waiting.review)
-  if (typeof finding === 'string') {
-    return fail(`Not added: ${finding}`)
-  }
-  if (waiting.answer === 'ask') {
-    await p.incoming.update(w => (w === null ? w : { ...w, review: { ...w.review, findings: [...w.review.findings, finding] } }))
+/** Reads "skipped": the group and why; a sentence naming what is wrong when it can't. */
+function readSkip(input: ReviewInput): { group: Group; reason: string } | string {
+  const { group, reason } = input
+  if (group !== 'standards' && group !== 'spec') {
+    return '"group" must be "standards" or "spec".'
   }
 
-  return { text: `Added #${finding.n}: ${finding.title}` }
+  return { group, reason: typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : 'not run' }
+}
+
+/**
+ * Records "add" and "skipped" into the review being built: the one waiting
+ * for "Replace?" when there is one, else the one shown. Once the user chose
+ * to keep the old one, the new review's findings are let go, but Claude is
+ * told all went well: the question only decides what the panel keeps.
+ */
+async function record(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
+  const waiting = await p.incoming.get()
+  const target = waiting?.review ?? (await p.review.get())
+  if (target === null) {
+    return fail('No review is open. Call "start" first.')
+  }
+  const write = async (change: (review: Review) => Review) => {
+    if (waiting === null) {
+      await changeReview(p, change)
+    } else if (waiting.answer === 'ask') {
+      await p.incoming.update(w => (w === null ? w : { ...w, review: change(w.review) }))
+    }
+    await p.shouldFocus.update(() => true)
+  }
+  if (input.action === 'add') {
+    const finding = readFinding(input, target)
+    if (typeof finding === 'string') {
+      return fail(`Not added: ${finding}`)
+    }
+    await write(r => ({ ...r, findings: [...r.findings, finding] }))
+    return { text: `Added #${finding.n}: ${finding.title}` }
+  }
+  const skip = readSkip(input)
+  if (typeof skip === 'string') {
+    return fail(skip)
+  }
+  await write(r => skipGroup(r, skip.group, skip.reason))
+
+  return { text: `${GROUP_LABELS[skip.group]} skipped: ${skip.reason}` }
 }
 
 /** Serves the review tool. Every answer is one line. */
@@ -193,39 +220,16 @@ export async function runTool(p: ToolPorts, input: ReviewInput): Promise<ToolAns
   if (input.action === 'start') {
     return start(p, input)
   }
-  if (input.action !== 'add' && input.action !== 'skipped' && input.action !== 'set-status' && input.action !== 'outcome') {
-    return fail('Unknown action. Use "start", "add", "skipped", "outcome" or "set-status".')
+  if (input.action === 'add' || input.action === 'skipped') {
+    return record(p, input)
   }
-  const waiting = await p.incoming.get()
-  if (waiting !== null && (input.action === 'add' || input.action === 'skipped')) {
-    return recordIncoming(p, input, waiting)
+  if (input.action !== 'set-status' && input.action !== 'outcome') {
+    return fail('Unknown action. Use "start", "add", "skipped", "outcome" or "set-status".')
   }
   const review = await p.review.get()
   if (review === null) {
     return fail('No review is open. Call "start" first.')
   }
-  if (input.action === 'add') {
-    const finding = readFinding(input, review)
-    if (typeof finding === 'string') {
-      return fail(`Not added: ${finding}`)
-    }
-    await p.review.update(r => (r === null ? r : { ...r, findings: [...r.findings, finding] }))
-    await p.isChanged.update(() => true)
-    return { text: `Added #${finding.n}: ${finding.title}` }
-  }
-  if (input.action === 'set-status') {
-    return changeStatus(p, input)
-  }
-  if (input.action === 'outcome') {
-    return recordOutcome(p, review, input)
-  }
-  const group = input.group
-  if (group !== 'standards' && group !== 'spec') {
-    return fail('"group" must be "standards" or "spec".')
-  }
-  const reason = typeof input.reason === 'string' && input.reason.trim() !== '' ? input.reason.trim() : 'not run'
-  await p.review.update(r => (r === null ? r : skipGroup(r, group as Group, reason)))
-  await p.isChanged.update(() => true)
 
-  return { text: `${group === 'spec' ? 'Spec' : 'Standards'} skipped: ${reason}` }
+  return input.action === 'set-status' ? changeStatus(p, input) : recordOutcome(p, review, input)
 }
