@@ -8,7 +8,6 @@ import {
   backToList,
   confirmStep,
   drop,
-  fixIt,
   openFinding,
   keepReview,
   numberRows,
@@ -23,6 +22,7 @@ import {
   submitReview,
   switchMode,
   togglePending,
+  toggleQueued,
   wontFix,
 } from './actions'
 import { KEEP_MS, PANE, PANE_TITLE, RULE, SAVED, TOOL, recheckNote } from './config'
@@ -63,11 +63,6 @@ function ports($: $): Ports {
     },
     fill: async text => {
       await $.prompt.fill({ text })
-    },
-    toolNames: async () => (await $.tool.list()).map(tool => tool.name),
-    callTool: async (tool, input) => {
-      const ran = (await $.tool.call({ tool, ...input } as never)) as { result?: unknown; isError?: boolean }
-      return ran.isError === true || ran.result === undefined ? undefined : String(ran.result)
     },
     review: {
       get: () => read($, review),
@@ -197,7 +192,7 @@ export const register: Register = on => {
       const n = finding.n
       return drawFindingPane(parts, { finding, mode: current.mode, view: shown, notice: await read($, notice), columns }, {
         back: () => backToList(ports($)),
-        fix: () => fixIt(ports($), n),
+        toggleQueued: () => toggleQueued(ports($), n),
         wontFix: () => wontFix(ports($), n),
         ask: () => askAbout(ports($), n),
         drop: () => drop(ports($), n),
@@ -218,7 +213,8 @@ export const register: Register = on => {
     }
 
     if (current !== null && shown.kind === 'confirm') {
-      return drawConfirmPane(parts, shown.step, current.pr, { confirm: () => confirmStep(ports($)), cancel: () => backToList(ports($)) })
+      const queued = current.findings.filter(f => f.status === 'queued').length
+      return drawConfirmPane(parts, shown.step, current.pr, queued, { confirm: () => confirmStep(ports($)), cancel: () => backToList(ports($)) })
     }
 
     return drawListPane(

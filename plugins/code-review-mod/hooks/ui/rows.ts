@@ -51,6 +51,7 @@ export function findingLabel(finding: Finding, width: number): string {
 export function statusTag(status: FindingStatus): { text: string; color: 'yellow' | 'green' | undefined } | null {
   const tags: Record<FindingStatus, { text: string; color: 'yellow' | 'green' | undefined } | null> = {
     open: null,
+    queued: { text: 'in fix list', color: 'yellow' },
     fixing: { text: 'fixing', color: 'yellow' },
     fixed: { text: '✔ fixed', color: 'green' },
     wontfix: { text: "won't fix", color: undefined },

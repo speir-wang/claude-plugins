@@ -9,7 +9,7 @@ import { scoreText, weightText } from './rows'
 /** What the buttons in the finding pane do. */
 export type FindingActions = {
   back: () => void | Promise<void>
-  fix: () => void | Promise<void>
+  toggleQueued: () => void | Promise<void>
   wontFix: () => void | Promise<void>
   ask: () => void | Promise<void>
   drop: () => void | Promise<void>
@@ -116,7 +116,15 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
 
       {mode === 'mine' && (
         <Box flexDirection="row" columnGap={1} marginTop={1}>
-          <Button key="fix" label="Fix it" variant="primary" hotkey="f" onPress={actions.fix} />
+          {(finding.status === 'open' || finding.status === 'queued') && (
+            <Button
+              key="queue"
+              label={finding.status === 'queued' ? 'Remove from fix list' : 'Add to fix list'}
+              variant="primary"
+              hotkey="f"
+              onPress={actions.toggleQueued}
+            />
+          )}
           <Button key="wontfix" label="Won't fix" hotkey="w" onPress={actions.wontFix} />
           <Button key="ask" label="Ask Claude" hotkey="a" onPress={actions.ask} />
         </Box>

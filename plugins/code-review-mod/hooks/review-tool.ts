@@ -1,7 +1,5 @@
 import type { Finding, FindingStatus, Group, Incoming, Outcome, Review, ReviewInput } from '../types'
 
-import { startFix } from './actions'
-
 import { TOOL_NAME } from './config'
 import { readMyComments } from './github'
 import { pickMode } from './mode'
@@ -38,7 +36,7 @@ export const TOOL_SPEC = {
       number: { type: 'integer', minimum: 1, description: 'For "outcome" and "set-status": the finding\'s number.' },
       outcome: { type: 'string', enum: ['addressed', 'wrong', 'missed'], description: 'For "outcome".' },
       note: { type: 'string', description: 'For "outcome": one line on why.' },
-      status: { type: 'string', enum: ['open', 'fixing', 'fixed', 'wontfix'], description: 'For "set-status".' },
+      status: { type: 'string', enum: ['open', 'queued', 'fixing', 'fixed', 'wontfix'], description: 'For "set-status": "queued" puts it on the fix list.' },
     },
     required: ['action'],
   },
@@ -47,7 +45,7 @@ export const TOOL_SPEC = {
 export type ToolAnswer = { text: string; isError?: true }
 
 /** What serving the tool needs. */
-export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'isReviewing' | 'toolNames' | 'callTool' | 'run'>
+export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'isReviewing' | 'run'>
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
@@ -133,9 +131,9 @@ async function recordOutcome(p: ToolPorts, review: Review, input: ReviewInput): 
   return { text: `#${number}: ${outcome === 'addressed' ? 'addressed' : outcome === 'wrong' ? 'addressed wrongly' : 'not addressed'}` }
 }
 
-const STATUSES: FindingStatus[] = ['open', 'fixing', 'fixed', 'wontfix']
+const STATUSES: FindingStatus[] = ['open', 'queued', 'fixing', 'fixed', 'wontfix']
 
-/** "set-status": "fixing" works like the Fix it button. */
+/** "set-status": "queued" is the Add to fix list button; "fixing" and "fixed" follow Claude's work. */
 async function changeStatus(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   const { number, status } = input
   const finding = (await p.review.get())?.findings.find(f => f.n === number)
@@ -143,13 +141,11 @@ async function changeStatus(p: ToolPorts, input: ReviewInput): Promise<ToolAnswe
     return fail(`No finding number ${String(number)}.`)
   }
   if (!STATUSES.includes(status as FindingStatus)) {
-    return fail('"status" must be "open", "fixing", "fixed" or "wontfix".')
+    return fail('"status" must be "open", "queued", "fixing", "fixed" or "wontfix".')
   }
-  if (status === 'fixing') {
-    const started = await startFix(p, number)
-    return started !== null && 'todo' in started
-      ? { text: `#${number} is being fixed: added the todo "${started.todo}".` }
-      : { text: `#${number} is being fixed. Fix it now, then set its status to "fixed".` }
+  if (status === 'queued') {
+    await p.review.update(r => (r === null ? r : setStatus(r, number, 'queued')))
+    return { text: `#${number} is on the fix list. Don't fix it yet: the user fixes the list with Fix all.` }
   }
   await p.review.update(r => (r === null ? r : setStatus(r, number, status as FindingStatus)))
 

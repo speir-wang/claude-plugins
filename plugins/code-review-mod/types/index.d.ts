@@ -9,10 +9,10 @@ export type Weight = 'must' | 'maybe'
 
 /**
  * Where a finding stands.
- * Your PR: open, fixing, fixed, wontfix.
+ * Your PR: open, queued (on the fix list), fixing, fixed, wontfix.
  * Their PR: open, pending (in the review not yet posted), posted, dropped.
  */
-export type FindingStatus = 'open' | 'fixing' | 'fixed' | 'wontfix' | 'pending' | 'posted' | 'dropped'
+export type FindingStatus = 'open' | 'queued' | 'fixing' | 'fixed' | 'wontfix' | 'pending' | 'posted' | 'dropped'
 
 /** A re-check's answer for one finding you acted on. */
 export type Outcome = 'addressed' | 'wrong' | 'missed'
@@ -70,7 +70,7 @@ export type View =
   | { kind: 'list' }
   | { kind: 'finding'; n: number; input?: 'edit' | 'rewrite'; isRewriting?: boolean }
   | { kind: 'submit'; event: ReviewEvent }
-  | { kind: 'confirm'; step: 'approve' | 'create' }
+  | { kind: 'confirm'; step: 'approve' | 'create' | 'fix' }
 
 /** The review tool's input, unchecked: the model may send anything. */
 export type ReviewInput = { action?: unknown } & Record<string, unknown>

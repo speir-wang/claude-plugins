@@ -13,7 +13,7 @@ Standards
 Spec
 #4  8/10 must fix cart.ts:7   Discount ignores the cap
 
-Tip: "fix 3" or press a row · "re-check" after fixing · one review per session
+Tip: "fix 3" adds #3 to the fix list · Fix all fixes the list in one commit · then "re-check" · one review per session
 ```
 
 ## Install
@@ -37,11 +37,11 @@ Run the review with no PR link. On each finding:
 
 | Button | Key | What it does |
 |---|---|---|
-| Fix it | `f` | Adds a todo in [todo-commits](../todo-commits), so the fix gets its own commit. Without todo-commits, Claude fixes it right away |
+| Add to fix list | `f` | Queues it. Nothing is fixed yet |
 | Won't fix | `w` | Closes it without changing code |
 | Ask Claude | `a` | Puts the finding in the prompt box, so you can ask about it |
 
-You can also just say *"fix 3"*.
+You can also just say *"fix 3"*. Then press **N queued · Fix all**. After you confirm, Claude fixes the whole list in one commit, with a normal message about the change.
 
 ### Someone else's PR
 

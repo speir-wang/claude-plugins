@@ -72,7 +72,7 @@ export function setStatus(review: Review, n: number, status: FindingStatus): Rev
 export function counts(review: Review): { open: number; pending: number; done: number } {
   const is = (...statuses: FindingStatus[]) => review.findings.filter(f => statuses.includes(f.status)).length
 
-  return { open: is('open'), pending: is('fixing', 'pending'), done: is('fixed', 'wontfix', 'posted', 'dropped') }
+  return { open: is('open'), pending: is('queued', 'fixing', 'pending'), done: is('fixed', 'wontfix', 'posted', 'dropped') }
 }
 
 /**

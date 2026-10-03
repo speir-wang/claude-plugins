@@ -7,9 +7,6 @@ export const SKILL = 'mattpocock-skills:code-review'
 export const TOOL_NAME = 'review'
 export const TOOL = `mcp__code-review-mod__${TOOL_NAME}`
 
-/** todo-commits' tool: "Fix it" adds a todo through it when it is there. */
-export const TODO_TOOL = 'mcp__todo-commits__todos'
-
 /** Where a session's review is saved for `claude --resume`: this, then the session id. */
 export const SAVED = 'review:'
 
@@ -18,13 +15,13 @@ export const KEEP_MS = 7 * 24 * 60 * 60 * 1000
 
 /** The one-line tip at the bottom of the panel, by mode. */
 export const TIPS = {
-  mine: 'Tip: "fix 3" or press a row · "re-check" after fixing · one review per session',
+  mine: 'Tip: "fix 3" adds #3 to the fix list · Fix all fixes the list in one commit · then "re-check" · one review per session',
   theirs: 'Tip: press a row to add its comment · Submit posts them as one review · one review per session',
 } as const
 
 /** The key hint at the bottom of a finding, by mode. ↑/↓ and Enter are the panel's own. */
 export const KEYS = {
-  mine: 'Keys: f fix · w won\'t fix · a ask · Esc back',
+  mine: 'Keys: f add to fix list · w won\'t fix · a ask · Esc back',
   theirs: 'Keys: p add to review · d drop · e edit · r rewrite · Esc back',
 } as const
 
@@ -38,7 +35,8 @@ export const RULE = [
   '- On a PR that is not the user\'s ("theirs"), also give "comment": the comment to post for the author. Short, polite, asked as a question. No score and no Standards/Spec label. Leave out the code: the panel adds the suggested code below it.',
   `- When a group did not run, call ${TOOL} "skipped" with the group and the reason (for example "no spec found").`,
   '- In the chat, write only the skill\'s one-line summary: the count and the worst finding per group. Do not repeat the findings.',
-  `- When the user says "fix 3" or similar on their own PR, call ${TOOL} "set-status" with number 3 and status "fixing". After fixing a finding, call "set-status" with status "fixed". "won't fix 3" is status "wontfix".`,
+  `- On their own PR, "fix 3" means: put #3 on the fix list with ${TOOL} "set-status" (number 3, status "queued"). Don't fix it yet: the user fixes the whole list at once with the panel's Fix all. "won't fix 3" is status "wontfix".`,
+  `- When you fix findings, call "set-status" with status "fixing" as you start and "fixed" when done. Make one commit for the fixes together, with a normal message about the change that does not mention a review.`,
   `- To re-check: call ${TOOL} "start" again with the same pr and the new head. Its answer lists the findings to check and the commit to review from. Record each one with "outcome" (number, outcome "addressed", "wrong" or "missed", note). Then run the code review on every commit since that commit, and record new problems with "add" as usual.`,
 ].join('\n')
 

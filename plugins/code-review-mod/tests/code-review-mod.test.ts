@@ -19,10 +19,8 @@ type World = {
   /** The context each submitted prompt carried. */
   contexts: (readonly string[] | undefined)[]
   filled: string[]
-  /** Calls made to other tools, like todo-commits'. */
+  /** Calls made to any other tool. */
   called: { tool: string; input: Record<string, unknown> }[]
-  /** The tools Claude has; todo-commits' tool is there unless removed. */
-  tools: string[]
   /** What the model answers to a draft rewrite; undefined gives no answer. */
   rewrite?: string
   store: Record<string, unknown>
@@ -41,7 +39,6 @@ function world(on: On, stored: Record<string, unknown> = {}): World {
     contexts: [],
     filled: [],
     called: [],
-    tools: [TOOL, 'mcp__todo-commits__todos', 'Bash'],
     store: { ...stored },
     sessionId: 's1',
     clock: undefined as never,
@@ -68,7 +65,6 @@ function world(on: On, stored: Record<string, unknown> = {}): World {
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('skill.prompt', ($, e) => ({ text: e.text }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__code-review-mod__${e.name}` } }) as never)
-  on('tool.list', () => ({ value: w.tools.map(name => ({ name, description: '', mcp: name.startsWith('mcp__') })) }) as never)
   on('session.id', () => ({ value: w.sessionId }) as never)
   on('store.get', ($, e) => ({ value: w.store[e.key] }) as never)
   on('store.set', ($, e) => {
@@ -331,30 +327,52 @@ async function openMine($: Engine) {
   return drawn
 }
 
-test('Fix it adds a todo in todo-commits and marks the finding fixing', async ($, on) => {
+test('Add to fix list queues a finding without fixing it; Remove takes it off', async ($, on) => {
   const w = world(on)
   const drawn = await openMine($)
 
-  await drawn.press({ key: 'fix' })
+  await drawn.press({ key: 'queue' })
 
-  expect(w.called.map(c => [c.tool, c.input.action, c.input.titles])).toEqual([['mcp__todo-commits__todos', 'add', ['Fix review #1: Name the magic number']]])
+  expect(await texts(drawn)).toContain('in fix list')
+  expect(await texts(drawn)).toContain('0 open · 1 pending · 0 done')
+  expect(String((await drawn.find({ key: 'fixall' }))?.props.label)).toBe('1 queued · Fix all')
   expect(w.submitted).toEqual([])
-  expect(await texts(drawn)).toContain('fixing')
-  expect((await drawn.findAll({ type: 'Text' })).map(t => t.text).join(' ')).toMatch('0 open · 1 pending · 0 done')
+  expect(w.called).toEqual([])
+
+  await drawn.press({ key: 'f-1' })
+  expect(String((await drawn.find({ key: 'queue' }))?.props.label)).toBe('Remove from fix list')
+  await drawn.press({ key: 'queue' })
+  expect(await drawn.find({ key: 'fixall' })).toBeUndefined()
 })
 
-test('without todo-commits, Fix it asks Claude to fix that one finding now', async ($, on) => {
+test('Fix all asks first, then has Claude fix the whole list in one plain commit', async ($, on) => {
   const w = world(on)
-  w.tools = w.tools.filter(t => !t.startsWith('mcp__todo-commits'))
-  const drawn = await openMine($)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { ...FINDING, title: 'Second', suggested: '' })
+  await review($, { ...FINDING, title: 'Left alone' })
+  await review($, { action: 'set-status', number: 1, status: 'queued' })
+  await review($, { action: 'set-status', number: 2, status: 'queued' })
+  const drawn = await pane($)
 
-  await drawn.press({ key: 'fix' })
+  await drawn.press({ key: 'fixall' })
+  expect((await texts(drawn)).join(' ')).toMatch('Fix the 2 findings on the fix list now, in one commit?')
+  await drawn.press({ key: 'cancel' })
+  expect(w.submitted).toEqual([])
 
-  expect(w.called).toEqual([])
+  await drawn.press({ key: 'fixall' })
+  await drawn.press({ key: 'confirm' })
+
   expect(w.submitted).toHaveLength(1)
-  expect(w.submitted[0]).toMatch('#1')
-  expect(w.submitted[0]).toMatch('src/app.ts:12')
-  expect(w.submitted[0]).toMatch('const RETRY_MS = 3000')
+  const prompt = w.submitted[0]!
+  expect(prompt).toMatch('#1 src/app.ts:12: Name the magic number')
+  expect(prompt).toMatch('const RETRY_MS = 3000')
+  expect(prompt).toMatch('#2 src/app.ts:12: Second')
+  expect(prompt).not.toMatch('Left alone')
+  expect(prompt).toMatch('Make one commit for all of them')
+  expect(prompt).toMatch('do not mention a review')
+  expect(await texts(drawn)).toContain('fixing')
+  expect(await drawn.find({ key: 'fixall' })).toBeUndefined()
 })
 
 test("Won't fix closes a finding without changing code", async ($, on) => {
@@ -377,15 +395,16 @@ test('Ask Claude puts the finding in the prompt box for a question', async ($, o
   expect(w.filled).toEqual(['About review finding #1 (Name the magic number, src/app.ts:12): '])
 })
 
-test('"fix 3" in chat works through set-status, and fixed marks it done', async ($, on) => {
+test('"fix 3" in chat puts it on the fix list; fixed marks it done', async ($, on) => {
   const w = world(on)
   await startMine($)
   await review($, FINDING)
 
-  const fixing = await review($, { action: 'set-status', number: 1, status: 'fixing' })
-  expect(fixing.isError).toBe(false)
-  expect(fixing.text).toMatch('todo')
-  expect(w.called.map(c => c.input.action)).toEqual(['add'])
+  const queued = await review($, { action: 'set-status', number: 1, status: 'queued' })
+  expect(queued.isError).toBe(false)
+  expect(queued.text).toMatch('fix list')
+  expect(w.submitted).toEqual([])
+  expect(await paneText($)).toMatch('in fix list')
 
   await review($, { action: 'set-status', number: 1, status: 'fixed' })
   expect(await paneText($)).toMatch('0 open · 0 pending · 1 done')
@@ -413,7 +432,7 @@ test('on their PR a finding shows the comment draft under why it matters, with t
   expect(shown.indexOf('Why it matters')).toBeLessThan(shown.indexOf('Comment for the author'))
   expect(shown).toContain('Could this number get a name, so readers know it is the retry wait?')
   expect((await drawn.findAll({ type: 'Code' })).map(c => c.props.source)).toContain('const RETRY_MS = 3000')
-  expect(await drawn.find({ key: 'fix' })).toBeUndefined()
+  expect(await drawn.find({ key: 'queue' })).toBeUndefined()
   for (const key of ['drop', 'edit', 'rewrite']) expect(await drawn.find({ key })).toBeDefined()
 })
 
@@ -839,7 +858,7 @@ test('each button in a finding on your PR has its letter, and the detail view sa
   world(on)
   const mine = await openMine($)
 
-  expect(await hotkeys(mine)).toEqual({ fix: 'f', wontfix: 'w', ask: 'a' })
+  expect(await hotkeys(mine)).toEqual({ queue: 'f', wontfix: 'w', ask: 'a' })
   expect((await texts(mine)).join(' ')).toMatch('Esc back')
 })
 

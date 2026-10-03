@@ -1,6 +1,6 @@
 import type { Finding, ReviewEvent } from '../types'
 
-import { TODO_TOOL, TOOL } from './config'
+import { TOOL } from './config'
 import { rewriteDraft } from './draft'
 import { approvePr, postReview } from './github'
 import { flipMode } from './mode'
@@ -28,45 +28,39 @@ export async function switchMode(p: Pick<Ports, 'review'>) {
   await p.review.update(review => (review === null ? review : { ...review, mode: flipMode(review.mode) }))
 }
 
-/** The prompt that asks Claude to fix one finding now. */
-function fixPrompt(f: Finding): string {
+/** The prompt that asks Claude to fix every finding on the fix list, in one commit. */
+export function fixAllPrompt(findings: Finding[]): string {
+  const items = findings.flatMap(f => [
+    `#${f.n} ${f.file}:${f.line}: ${f.title}`,
+    `   ${f.why}`,
+    ...(f.suggested.trim() === '' ? [] : ['   Suggested code:', '   ```', ...f.suggested.split('\n').map(line => `   ${line}`), '   ```']),
+  ])
+
   return [
-    `Fix review finding #${f.n}: ${f.title} (${f.file}:${f.line}).`,
+    'Fix these problems on my branch, all in one go:',
     '',
-    f.why,
-    ...(f.suggested.trim() === '' ? [] : ['', 'Suggested code:', '```', f.suggested, '```']),
+    ...items,
     '',
-    `When it is fixed, call ${TOOL} "set-status" with number ${f.n} and status "fixed".`,
+    'Make one commit for all of them. Write its message about the actual change, as for any normal commit: do not mention a review or these numbers.',
+    `When they are fixed, call ${TOOL} "set-status" with status "fixed" for each number: ${findings.map(f => `#${f.n}`).join(', ')}.`,
   ].join('\n')
 }
 
-type FixPorts = Pick<Ports, 'review' | 'toolNames' | 'callTool'>
-
-/**
- * Marks a finding as being fixed. With todo-commits installed it becomes a
- * todo, so the fix gets its own commit; answers how it went, in one line.
- * Without it, answers the prompt that asks Claude to fix it now.
- */
-export async function startFix(p: FixPorts, n: number): Promise<{ todo: string } | { prompt: string } | null> {
-  const finding = (await p.review.get())?.findings.find(f => f.n === n)
-  if (finding === undefined) {
-    return null
-  }
-  await p.review.update(review => (review === null ? review : setStatus(review, n, 'fixing')))
-  if ((await p.toolNames()).includes(TODO_TOOL)) {
-    const title = `Fix review #${n}: ${finding.title}`
-    await p.callTool(TODO_TOOL, { action: 'add', titles: [title] })
-    return { todo: title }
-  }
-
-  return { prompt: fixPrompt(finding) }
+/** Add to fix list / Remove from fix list. Nothing is fixed until Fix all. */
+export async function toggleQueued(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
+  await p.review.update(review =>
+    review === null ? review : changeFinding(review, n, f => ({ ...f, status: f.status === 'queued' ? 'open' : 'queued' })),
+  )
+  await backToList(p)
 }
 
-/** The Fix it button: a todo, or a prompt to Claude when todo-commits is not there. */
-export async function fixIt(p: FixPorts & ViewPorts & Pick<Ports, 'submit'>, n: number) {
-  const started = await startFix(p, n)
-  if (started !== null && 'prompt' in started) {
-    await p.submit(started.prompt)
+/** Fix all, once confirmed: Claude fixes the whole fix list in one commit. */
+export async function fixAll(p: Pick<Ports, 'review' | 'submit'> & ViewPorts) {
+  const queued = (await p.review.get())?.findings.filter(f => f.status === 'queued') ?? []
+  if (queued.length > 0) {
+    const fixing = new Set(queued.map(f => f.n))
+    await p.review.update(r => (r === null ? r : { ...r, findings: r.findings.map(f => (fixing.has(f.n) ? { ...f, status: 'fixing' as const } : f)) }))
+    await p.submit(fixAllPrompt(queued))
   }
   await backToList(p)
 }
@@ -186,7 +180,7 @@ export async function recheck(p: Pick<Ports, 'review' | 'submit'>) {
 }
 
 /** Approve PR / Create PR: the confirm step first. */
-export async function showConfirm(p: ViewPorts & Pick<Ports, 'notice'>, step: 'approve' | 'create') {
+export async function showConfirm(p: ViewPorts & Pick<Ports, 'notice'>, step: 'approve' | 'create' | 'fix') {
   await p.notice.update(() => '')
   await p.view.update(() => ({ kind: 'confirm', step }))
   await p.openPane({ closeOnEscape: true })
@@ -197,6 +191,10 @@ export async function confirmStep(p: ViewPorts & Pick<Ports, 'review' | 'notice'
   const review = await p.review.get()
   const view = await p.view.get()
   if (review === null || view.kind !== 'confirm') {
+    return
+  }
+  if (view.step === 'fix') {
+    await fixAll(p)
     return
   }
   if (view.step === 'create') {

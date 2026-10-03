@@ -22,10 +22,6 @@ export type Ports = {
   submit: (text: string) => Promise<void>
   /** Puts text in the prompt box for the user to finish. */
   fill: (text: string) => Promise<void>
-  /** The names of the tools Claude has now. */
-  toolNames: () => Promise<string[]>
-  /** Calls another plugin's tool; answers its result text, or nothing when it failed. */
-  callTool: (tool: string, input: Record<string, unknown>) => Promise<string | undefined>
   review: Cell<Review | null>
   incoming: Cell<Incoming | null>
   view: Cell<View>

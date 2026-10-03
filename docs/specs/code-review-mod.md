@@ -17,10 +17,10 @@ Status: ready for work · Written: 2026-10-03 · Plugin: code-review-mod (new)
 A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds a panel that holds one review for one PR, for the length of one Claude Code session.
 
 - When the code-review skill runs, the panel opens on its own. Claude records each finding in it, not in a long chat message. The chat gets only the skill's one-line summary.
-- Findings sit in two groups, **Standards** and **Spec**, never mixed. Inside each group they are sorted by a **1–10 score** for how much they're worth fixing. Each one also shows **must fix** or **maybe**.
+- Findings sit in two groups, **Standards** and **Spec**, never mixed. Inside each group they are sorted by a **1–10 score** for how much they're worth fixing. Each one is shown as a score out of 10, plus **must fix** when it breaks a written rule or the spec.
 - Opening a finding shows the score, the file and line, the code now, the suggested code, and why it matters.
 - **Mode** depends on how the review started. A PR link means it's someone else's PR. No link, on your own branch, means it's yours. You can flip the mode in the panel.
-  - **Your PR:** each finding can be fixed (it becomes a todo in todo-commits, so it gets its own commit), skipped as won't fix, or asked about.
+  - **Your PR:** each finding can go on a fix list, be skipped as won't fix, or be asked about. **Fix all** then fixes the whole list in one commit.
   - **Their PR:** each finding carries a comment draft. That draft is exactly what goes on GitHub. You add drafts to a pending review, then submit them all at once as one GitHub review.
 - **Re-check.** Ask in plain words, or press a button. Each finding you acted on gets ✅ addressed, ⚠️ addressed wrongly, or ❌ not addressed. Then every commit since the last review gets a full review, and any new problems show in their own list. On their PR, the re-check rebuilds the list from your own comments on GitHub, so it works in a brand-new session. Nothing is saved locally.
 - When nothing is left to do, the panel suggests the next step: **Approve PR** on theirs, **Create PR** on your branch if it isn't on GitHub yet.
@@ -62,12 +62,12 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 
 ### My own PR
 
-28. As a developer, I want "Fix it" on a finding to add a todo in todo-commits, so that each fix gets its own commit.
-29. As a developer, I want "Fix it" to ask Claude to fix the finding right away when todo-commits isn't installed, so that the button still works.
-30. As a developer, I want to say "fix 3" in chat as well as press the button, so that I can work from the keyboard.
+28. As a developer, I want "Add to fix list" on a finding, so that I can pick what to fix before any work starts.
+29. As a developer, I want "Fix all" to ask first, then have Claude fix the whole list in one commit with a normal message that doesn't mention the review, so that a PR doesn't fill up with review commits.
+30. As a developer, I want to say "fix 3" in chat to put #3 on the fix list, as well as press the button, so that I can work from the keyboard.
 31. As a developer, I want "Won't fix" on a finding, so that I can close it without changing code.
 32. As a developer, I want "Ask Claude" on a finding, so that I can ask about it without copying it into the chat.
-33. As a developer, I want each finding's status (open, fixing, fixed, won't fix) shown in its row, so that I know what's left.
+33. As a developer, I want each finding's status (open, in fix list, fixing, fixed, won't fix) shown in its row, so that I know what's left.
 
 ### Their PR
 
@@ -95,7 +95,7 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 52. As a reviewer, I want threads marked resolved still checked, so that "resolved" without a real fix is caught.
 53. As a reviewer, I want the re-check to start from the commit my last review was made on, so that "since the last review" is exact.
 54. As a developer, I want a "Re-check" button in the panel, so that I can start one without typing.
-55. As a developer, I want each finding I acted on (posted on theirs, "fix it" on mine) to get ✅ addressed, ⚠️ addressed wrongly, or ❌ not addressed, so that I know what's left.
+55. As a developer, I want each finding I acted on (posted on theirs, fixed through Fix all on mine) to get ✅ addressed, ⚠️ addressed wrongly, or ❌ not addressed, so that I know what's left.
 56. As a developer, I want findings I dropped or marked won't fix left out of the re-check, so that I'm not asked about them again.
 57. As a developer, I want every commit since the last review fully reviewed, so that regressions in other areas are caught too.
 58. As a developer, I want new problems from a re-check listed separately from the old findings, so that I can tell old from new.
@@ -112,7 +112,7 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 
 64. As a developer, I want the review panel and the todo panel open at the same time, as tabs, so that I never close one to use the other.
 65. As a developer, I want the tab that just changed to come to the front by itself (a review or re-check finishes → review tab; Claude starts a todo → todo tab), so that I never switch tabs by hand.
-66. As a developer, I want the two mods to work without knowing about each other, except for "Fix it" adding a todo, so that each one installs on its own.
+66. As a developer, I want the two mods to work without knowing about each other, so that each one installs on its own.
 
 ### Lifetime
 
@@ -150,7 +150,7 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
 
 **Lifetime.** Review state lives in the session's state. A copy is kept in the store under the session's id, only so `claude --resume` brings it back (see the facts below). No other session reads it. One review per session. Starting a review of a different PR asks before replacing.
 
-**Fix it.** If todo-commits is installed, Fix it adds a todo naming the finding, through todo-commits' tool. Otherwise it sends Claude a prompt to fix that one finding.
+**Fix list.** On your PR, "Add to fix list" (or "fix 3" in chat) queues a finding; nothing is fixed yet. "N queued · Fix all" asks first, then sends Claude one prompt with every queued finding. Claude fixes them all and makes one commit, with a normal message about the change that doesn't mention the review. It doesn't use todo-commits: plugins install one by one, so the mod can't count on it.
 
 **UI.** Only the panel. No status line entry, no band, no toast.
 
@@ -170,7 +170,7 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
 - **Skill hook on a typed slash command:** yes. `skill.prompt` fires when you type `/name`, when Claude calls the Skill tool, and when a skill is preloaded. The mod hooks it and adds the rule to the skill's own text.
 - **Panel to the front:** opening a panel that's already open only changes its title. Opening it with `focus` asks the screen to raise it. That only works while the prompt box is empty. So the mod opens with `focus` when a review or re-check finishes.
 - **Session state on `claude --resume`:** not promised. `$.state` lives for the running process. So the mod also writes the review to the store under the session's id, and reads it back only when that same session starts again. Saved reviews older than 7 days are deleted. No other session reads them.
-- **Is todo-commits installed:** `$.tool.list()` holds `mcp__todo-commits__todos`. Fix it then calls that tool with action `add`.
+- **Is todo-commits installed:** `$.tool.list()` holds `mcp__todo-commits__todos`. Not used in the end: the fix list replaced the link to todo-commits.
 
 ## Testing Decisions
 

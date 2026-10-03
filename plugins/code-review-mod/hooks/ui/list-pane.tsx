@@ -28,7 +28,7 @@ export type ListActions = {
   replace: () => void | Promise<void>
   keep: () => void | Promise<void>
   recheck: () => void | Promise<void>
-  next: (step: 'approve' | 'create') => void | Promise<void>
+  next: (step: 'approve' | 'create' | 'fix') => void | Promise<void>
 }
 
 /** One block of sections: the first round, then one per re-check that found new problems. */
@@ -53,6 +53,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
     return <Text dimColor>No review yet. Run the code-review skill.</Text>
   }
   const { open, pending, done } = counts(review)
+  const queued = review.findings.filter(f => f.status === 'queued').length
   const shown = blocks(review)
   // Every number gets the same width, so the rows line up.
   const numberWidth = `#${review.findings.reduce((max, f) => Math.max(max, f.n), 0)}`.length + 1
@@ -95,6 +96,11 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
             <Button key="replace" label="Replace" variant="primary" onPress={actions.replace} />
             <Button key="keep" label={`Keep ${review.pr}`} onPress={actions.keep} />
           </Box>
+        </Box>
+      )}
+      {review.mode === 'mine' && queued > 0 && (
+        <Box key="fixall-box" marginBottom={1}>
+          <Button key="fixall" label={`${queued} queued · Fix all`} variant="primary" onPress={() => actions.next('fix')} />
         </Box>
       )}
       {review.mode === 'theirs' && pending > 0 && (
