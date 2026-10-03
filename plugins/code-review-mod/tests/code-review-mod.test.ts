@@ -940,3 +940,20 @@ test('a re-check of their PR keeps drafts not posted yet, after your GitHub comm
   expect(await texts(drawn)).toContain('in review')
   expect(String((await drawn.find({ key: 'submit' }))?.props.label)).toBe('1 pending · Submit review')
 })
+
+test('Approve PR stays hidden while a re-checked comment is not addressed or addressed wrongly', async ($, on) => {
+  const w = world(on)
+  fakeGitHub(w)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await review($, { action: 'start', pr: 'acme/shop#7', mode: 'theirs', head: HEAD })
+  await review($, { action: 'outcome', number: 1, outcome: 'addressed' })
+  await review($, { action: 'outcome', number: 2, outcome: 'wrong', note: 'Half done' })
+  await $.turn.complete(turnEnd())
+
+  expect(await paneText($)).not.toMatch('Approve PR')
+
+  await review($, { action: 'start', pr: 'acme/shop#7', mode: 'theirs', head: 'd'.repeat(40) })
+  await review($, { action: 'outcome', number: 2, outcome: 'addressed' })
+  await $.turn.complete(turnEnd())
+  expect(await paneText($)).toMatch('Approve PR')
+})

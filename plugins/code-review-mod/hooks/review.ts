@@ -78,11 +78,14 @@ export function counts(review: Review): { open: number; pending: number; done: n
 /**
  * The step to suggest once nothing is left: approve their PR when every
  * finding is posted or dropped; create a PR for your branch when every one
- * is fixed or won't fix and it isn't on GitHub yet. Nothing otherwise.
+ * is fixed or won't fix and it isn't on GitHub yet. Nothing while a re-check
+ * says a fix is missing or wrong.
  */
 export function nextStep(review: Review): 'approve' | 'create' | null {
   const isGitHub = /^[\w.-]+\/[\w.-]+#\d+$/.test(review.pr)
-  const isLeft = (...done: FindingStatus[]) => review.findings.some(f => !done.includes(f.status))
+  // A re-check that found a fix missing or wrong leaves work to do, whatever the status says.
+  const isUnfixed = review.findings.some(f => f.outcome === 'wrong' || f.outcome === 'missed')
+  const isLeft = (...done: FindingStatus[]) => isUnfixed || review.findings.some(f => !done.includes(f.status))
   if (review.mode === 'theirs') {
     return isGitHub && !isLeft('posted', 'dropped') ? 'approve' : null
   }
