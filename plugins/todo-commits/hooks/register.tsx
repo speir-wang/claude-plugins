@@ -1,38 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, Todo, TodoStatus } from '../types'
+import type { TodosInput } from '../types'
 
-import { splitDiff } from './diff'
-
-const TODO_PANE = 'todo-commits'
-const MAX_NEW_COMMITS = 50
-/** How many of the branch's earlier commits the panel lists. */
-const MAX_EARLIER = 20
-const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-const SPIN_MS = 125
-/** New files shown in the uncommitted view, at most. */
-const MAX_UNTRACKED = 20
-const TIPS: [string, string][] = [
-  ['"plan the changes for …"', 'Claude adds the steps here'],
-  ['"add a todo: …"', 'Claude adds one item'],
-  ['"go"', 'starts from the first one'],
-  ['/todos add …', 'adds one yourself, no Claude'],
-  ['/todos clear', 'empties this branch\'s list'],
-]
-
-const TOOL_NAME = 'todos'
-const TOOL = `mcp__todo-commits__${TOOL_NAME}`
-
-const COMMIT_RULE = [
-  `The user has a todo panel open. It only shows todos made with the ${TOOL} tool, so follow these rules:`,
-  `- When you propose a plan with two or more steps, add every step right away with ${TOOL} (action "add"), before you ask the user to go ahead. If an old list from an earlier plan is there, "clear" it first.`,
-  `- When the user asks to add a todo, add it with ${TOOL} (action "add") at the end of the list.`,
-  "- Don't start the work until the user says to go ahead.",
-  `- Then work through the todos in order. For each one: ${TOOL} "start" with its number, do the work, make one git commit with only that todo's changes, then ${TOOL} "done" with its number.`,
-  '- Write a short commit message that says what the todo did.',
-  "- Split the work into todos the way you normally would. Don't make extra todos just to get more commits.",
-].join('\n')
+import { backToList, showCommit, showWorking, toggleFile } from './commit-view'
+import { COMMIT_RULE, SPINNER, SPIN_MS, TODO_PANE, TOOL } from './config'
+import { changeStatus, changeTodos } from './ports'
+import type { Ports } from './ports'
+import { afterBash, syncPlace } from './sync'
+import { fromTodoWrite, renameTodo } from './todo-list'
+import { COMMAND_SPEC, TOOL_SPEC, runCommand, runTool } from './todo-tool'
+import { drawCommitPane } from './ui/commit-pane'
+import { drawListPane } from './ui/list-pane'
+import { toolRowLine } from './ui/rows'
+import { drawEmptyResult, drawToolRow } from './ui/tool-row'
 
 const todos = atom({ plugin: 'todo-commits', key: 'todos' } as const, [])
 const head = atom({ plugin: 'todo-commits', key: 'head' } as const, '')
@@ -46,375 +27,36 @@ const dropped = atom({ plugin: 'todo-commits', key: 'dropped' } as const, [])
 
 type $ = EngineInterface
 
-async function git($: $, args: string[]): Promise<string | undefined> {
-  const ran = await $.process.run(['git', ...args])
-
-  return ran.exitCode === 0 ? ran.stdout : undefined
-}
-
-async function readHead($: $): Promise<string> {
-  return (await git($, ['rev-parse', 'HEAD']))?.trim() ?? ''
-}
-
-async function isPaneOpen($: $): Promise<boolean> {
-  return (await $.ui.panes()).some(pane => pane.id === TODO_PANE)
-}
-
-/** Changes the list and saves it for this repo and branch. */
-async function changeTodos($: $, change: (list: Todo[]) => Todo[]) {
-  const list = await update($, todos, change)
-  const here = await read($, place)
-  if (here !== null) {
-    await $.store.set(`todos:${here.key}`, list)
+/** The engine's calls the other modules use, built for one event (see Ports). */
+function ports($: $): Ports {
+  return {
+    run: argv => $.process.run(argv),
+    storeGet: async key => $.store.get(key),
+    storeSet: async (key, value) => $.store.set(key, value),
+    now: async () => $.clock.now(),
+    isPaneOpen: async () => (await $.ui.panes()).some(pane => pane.id === TODO_PANE),
+    openPane: async args => {
+      await $.ui.open({ id: TODO_PANE, ...args })
+    },
+    closePane: async () => {
+      await $.ui.close({ id: TODO_PANE })
+    },
+    complete: request => $.model.complete(request),
+    todos: { get: () => read($, todos), update: change => update($, todos, change) },
+    head: { get: () => read($, head), update: change => update($, head, change) },
+    lastActiveId: { get: () => read($, lastActiveId), update: change => update($, lastActiveId, change) },
+    commit: { get: () => read($, commit), update: change => update($, commit, change) },
+    place: { get: () => read($, place), update: change => update($, place, change) },
+    earlier: { get: () => read($, earlier), update: change => update($, earlier, change) },
+    dropped: { get: () => read($, dropped), update: change => update($, dropped, change) },
   }
-}
-
-async function readPlace($: $): Promise<Place | null> {
-  const top = (await git($, ['rev-parse', '--show-toplevel']))?.trim()
-  const branch = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD']))?.trim()
-  if (top === undefined || branch === undefined) {
-    return null
-  }
-
-  return { key: `${top}#${branch}`, branch }
-}
-
-/**
- * Follows the repo and branch: on a change, loads that branch's saved list.
- * Answers true when the place changed, so HEAD's move is not read as new commits.
- */
-async function syncPlace($: $): Promise<boolean> {
-  const now = await readPlace($)
-  const was = await read($, place)
-  if (now?.key === was?.key) {
-    return false
-  }
-  const saved = now === null ? undefined : await $.store.get(`todos:${now.key}`)
-  await update($, place, () => now)
-  if (was === null && !Array.isArray(saved)) {
-    // First look in this session with nothing saved yet: keep the list in hand.
-    await changeTodos($, list => list)
-  } else {
-    await update($, todos, () => (Array.isArray(saved) ? (saved as Todo[]) : []))
-  }
-  await update($, lastActiveId, () => '')
-  const at = await readHead($)
-  await update($, head, () => at)
-  await refreshEarlier($)
-  await refreshDropped($)
-
-  return true
-}
-
-/** The main branch to compare against: origin's default, else main or master. */
-async function findBase($: $): Promise<string | undefined> {
-  const remote = (await git($, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']))?.trim()
-  if (remote) {
-    return remote
-  }
-  for (const name of ['main', 'master']) {
-    if ((await git($, ['rev-parse', '--verify', '--quiet', name])) !== undefined) {
-      return name
-    }
-  }
-
-  return undefined
-}
-
-async function refreshEarlier($: $) {
-  const here = await read($, place)
-  const base = await findBase($)
-  if (here === null || base === undefined || base.replace(/^origin\//, '') === here.branch) {
-    await update($, earlier, () => null)
-    return
-  }
-  const total = Number((await git($, ['rev-list', '--count', `${base}..HEAD`]))?.trim() ?? 0)
-  const log = (await git($, ['log', '--format=%H%x1f%s', `--max-count=${MAX_EARLIER}`, `${base}..HEAD`])) ?? ''
-  const commits = log
-    .split('\n')
-    .filter(Boolean)
-    .map(line => {
-      const [hash = '', subject = ''] = line.split('\x1f')
-      return { hash, subject }
-    })
-  const found: Earlier | null = total > 0 ? { base, total, commits } : null
-  await update($, earlier, () => found)
-}
-
-/** Opens (or retitles) the todo pane. */
-async function openPane($: $, args: { title: string; closeOnEscape?: true }) {
-  await $.ui.open({ id: TODO_PANE, ...args })
-}
-
-/** Notes which linked commits are no longer on the branch. */
-async function refreshDropped($: $) {
-  const hashes = (await read($, todos)).flatMap(todo => todo.commits)
-  const gone: string[] = []
-  for (const hash of hashes) {
-    const ran = await $.process.run(['git', 'merge-base', '--is-ancestor', hash, 'HEAD'])
-    if (ran.exitCode !== 0) {
-      gone.push(hash)
-    }
-  }
-  await update($, dropped, () => gone)
 }
 
 /** Opens the todo pane the first time Claude makes a list. */
-async function openIfNew($: $, hadTodos: boolean) {
-  if (!hadTodos && !(await isPaneOpen($))) {
-    await openPane($, { title: 'Todos' })
+async function openIfNew(p: Pick<Ports, 'isPaneOpen' | 'openPane'>, hadTodos: boolean) {
+  if (!hadTodos && !(await p.isPaneOpen())) {
+    await p.openPane({ title: 'Todos' })
   }
-}
-
-async function setStatus($: $, id: string, status: TodoStatus | 'deleted', title?: string) {
-  await changeTodos($, list =>
-    status === 'deleted'
-      ? list.filter(todo => todo.id !== id)
-      : list.map(todo => (todo.id === id ? { ...todo, status, title: title ?? todo.title } : todo)),
-  )
-  if (status === 'in_progress') {
-    await update($, lastActiveId, () => id)
-  }
-}
-
-/** Gives every commit made since the last look to the active todo; true when HEAD moved. */
-async function linkNewCommits($: $): Promise<boolean> {
-  const before = await read($, head)
-  const after = await readHead($)
-  if (after === '' || after === before) {
-    return false
-  }
-  await update($, head, () => after)
-
-  const range = before === '' ? [after] : [`${before}..${after}`]
-  const listed = await git($, ['rev-list', '--reverse', `--max-count=${MAX_NEW_COMMITS}`, ...range])
-  const hashes = (listed ?? after).split('\n').filter(Boolean)
-  const list = await read($, todos)
-  const target =
-    list.find(todo => todo.status === 'in_progress')?.id ?? (await read($, lastActiveId))
-  if (target === '' || hashes.length === 0) {
-    return true
-  }
-
-  await changeTodos($, current =>
-    current.map(todo =>
-      todo.id === target
-        ? { ...todo, commits: [...todo.commits, ...hashes.filter(h => !todo.commits.includes(h))] }
-        : todo,
-    ),
-  )
-
-  return true
-}
-
-/** Asks a small model whether each large file's diff is worth reading. */
-async function judgeLargeFiles($: $, message: string, files: CommitFile[]): Promise<Map<string, DiffVerdict>> {
-  const large = files.filter(file => file.isLarge)
-  const samples = large.map(file => {
-    const sample = file.pieces.map(piece => piece.text).join('\n').split('\n').slice(0, 40).join('\n')
-    return `FILE ${file.path} (+${file.added} -${file.removed})\n${sample.slice(0, 3000)}`
-  })
-  const asked = await $.model.complete({
-    model: 'haiku',
-    effort: 'low',
-    maxTokens: 800,
-    timeoutMs: 30000,
-    system:
-      'You help a developer review a git commit. For each large file diff, say whether it is worth reading by eye. ' +
-      'Generated or bulk changes (snapshot tests, lock files, minified or built files, fixtures, data dumps, ' +
-      'mass renames or formatting) are usually not. Hand-written logic usually is.',
-    prompt: [
-      `Commit message: ${message}`,
-      '',
-      ...samples,
-      '',
-      'Answer with JSON only: [{"path": "...", "isWorth": true|false, "reason": "one short plain sentence"}]',
-    ].join('\n'),
-  })
-  const verdicts = new Map<string, DiffVerdict>()
-  if (!asked.isAnswered) {
-    return verdicts
-  }
-  try {
-    const json: unknown = JSON.parse(asked.text.slice(asked.text.indexOf('['), asked.text.lastIndexOf(']') + 1))
-    for (const item of Array.isArray(json) ? json : []) {
-      if (typeof item?.path === 'string' && typeof item?.reason === 'string') {
-        verdicts.set(item.path, { isWorth: item.isWorth !== false, reason: item.reason })
-      }
-    }
-  } catch {
-    // A reply that is not JSON leaves the files without a verdict.
-  }
-
-  return verdicts
-}
-
-/** Shows a diff in the pane, folding large files and asking the model about them. */
-async function presentView($: $, view: CommitView, title: string) {
-  await update($, commit, () => view)
-  // Same pane as the list: Esc (or the pane's close mark) goes back, see the ui.close hook.
-  await openPane($, { title, closeOnEscape: true })
-
-  if (view.isChecking) {
-    const verdicts = await judgeLargeFiles($, view.message, view.files)
-    await update($, commit, current =>
-      current?.hash !== view.hash
-        ? current
-        : {
-            ...current,
-            isChecking: false,
-            files: current.files.map(file => {
-              const verdict = verdicts.get(file.path)
-              return verdict === undefined ? file : { ...file, verdict }
-            }),
-          },
-    )
-  }
-}
-
-async function showCommit($: $, hash: string) {
-  const message = (await git($, ['log', '-1', '--format=%B', hash]))?.trim()
-  const diff = await git($, ['show', '--format=', '--no-color', '--no-ext-diff', hash])
-  const files = message === undefined || diff === undefined ? [] : splitDiff(diff)
-  const view: CommitView = {
-    hash,
-    kind: 'commit',
-    message: message ?? 'This commit could not be read here. It may have been dropped and cleaned up by git.',
-    files,
-    isChecking: files.some(file => file.isLarge),
-  }
-  await presentView($, view, `Commit ${hash.slice(0, 7)}`)
-}
-
-/** Shows what is changed but not committed: tracked changes, then new files. */
-async function showWorking($: $) {
-  let diff = (await git($, ['diff', 'HEAD', '--no-color', '--no-ext-diff'])) ?? ''
-  const untracked = ((await git($, ['ls-files', '--others', '--exclude-standard'])) ?? '').split('\n').filter(Boolean)
-  for (const path of untracked.slice(0, MAX_UNTRACKED)) {
-    // Exits 1 whenever the file differs from nothing, so read stdout whatever the code.
-    diff += (await $.process.run(['git', 'diff', '--no-color', '--no-index', '--', '/dev/null', path])).stdout
-  }
-  const files = splitDiff(diff)
-  const extra = untracked.length - MAX_UNTRACKED
-  const view: CommitView = {
-    hash: 'working',
-    kind: 'working',
-    message:
-      'Not committed yet: the changes for the todo in progress.' +
-      (extra > 0 ? ` ${extra} more new files not shown.` : ''),
-    files,
-    isChecking: files.some(file => file.isLarge),
-  }
-  await presentView($, view, 'Uncommitted')
-}
-
-async function backToList($: $) {
-  await update($, commit, () => null)
-  await openPane($, { title: 'Todos' })
-}
-
-/** Turns what the person typed into a short todo title; undefined when the model gives nothing usable. */
-async function tidyTitle($: $, typed: string): Promise<string | undefined> {
-  const asked = await $.model.complete({
-    model: 'haiku',
-    effort: 'low',
-    maxTokens: 60,
-    timeoutMs: 8000,
-    system:
-      'Rewrite what the user typed as one short todo title. Start with a verb. At most 50 characters. ' +
-      'Keep any names, file names and numbers they wrote. Reply with the title only.',
-    prompt: typed,
-  })
-  if (!asked.isAnswered) {
-    return undefined
-  }
-  const title = asked.text.trim().split('\n')[0]?.replace(/^["'`]+|["'`.]+$/g, '').trim() ?? ''
-
-  return title === '' || title.length > 80 ? undefined : title
-}
-
-async function toggleFile($: $, hash: string, path: string) {
-  await update($, commit, current =>
-    current?.hash !== hash
-      ? current
-      : {
-          ...current,
-          files: current.files.map(file => (file.path === path ? { ...file, isOpen: !file.isOpen } : file)),
-        },
-  )
-}
-
-/** Cuts or pads text to exactly `width` cells (one cell per character). */
-function fit(text: string, width: number): string {
-  if (width <= 1) {
-    return ''
-  }
-  return text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width)
-}
-
-type TodosInput = { action?: unknown; titles?: unknown; number?: unknown }
-
-type TodosAnswer = { text: string; isError?: true }
-
-/** The numbered list, as the model reads it. */
-function listText(list: Todo[]): string {
-  return list.length === 0
-    ? 'The todo list is empty.'
-    : list.map((todo, i) => `${i + 1}. [${todo.status}] ${todo.title}`).join('\n')
-}
-
-/**
- * Serves the mod's own todo tool. "add" answers with the whole numbered list,
- * so the model learns the numbers; the rest answer in one line.
- */
-async function runTodosTool($: $, input: TodosInput): Promise<TodosAnswer> {
-  const list = await read($, todos)
-  const position = typeof input.number === 'number' ? input.number : NaN
-  const picked = list[position - 1]
-
-  if (input.action === 'add') {
-    const titles = Array.isArray(input.titles)
-      ? input.titles.filter((t): t is string => typeof t === 'string' && t.trim() !== '')
-      : []
-    if (titles.length === 0) {
-      return { text: 'Nothing added: "titles" needs at least one title.', isError: true }
-    }
-    const stamp = await $.clock.now()
-    const added: Todo[] = titles.map((title, i) => ({
-      id: `m${stamp}-${i}`,
-      title: title.trim(),
-      status: 'pending',
-      commits: [],
-    }))
-    await changeTodos($, current => [...current, ...added])
-
-    return { text: listText(await read($, todos)) }
-  }
-  if (input.action === 'start' || input.action === 'done') {
-    if (picked === undefined) {
-      return { text: `No todo number ${String(input.number)}. There are ${list.length}.`, isError: true }
-    }
-    if (input.action === 'done') {
-      // A commit made just before "done" still belongs to this todo.
-      await linkNewCommits($)
-    }
-    await setStatus($, picked.id, input.action === 'start' ? 'in_progress' : 'completed')
-    await update($, lastActiveId, () => picked.id)
-    const now = await read($, todos)
-    const done = now.filter(todo => todo.status === 'completed').length
-
-    return input.action === 'start'
-      ? { text: `Started ${position}: ${picked.title}` }
-      : { text: `Done ${position}: ${picked.title} (${done} of ${now.length} done)` }
-  }
-  if (input.action === 'clear') {
-    await changeTodos($, () => [])
-    await update($, lastActiveId, () => '')
-
-    return { text: 'The todo list is empty.' }
-  }
-
-  return { text: 'Unknown action. Use "add", "start", "done" or "clear".', isError: true }
 }
 
 export const register: Register = on => {
@@ -422,28 +64,9 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.command.register({
-      name: 'todos',
-      description: 'Show or hide the todo panel; "/todos add <text>" adds a todo, "/todos clear" empties the list',
-      argumentHint: '[add <text> | clear]',
-    })
-    await $.tool.register({
-      name: TOOL_NAME,
-      description:
-        "The user's todo panel. \"add\" appends steps as not started (titles). " +
-        '"start" and "done" take a todo\'s number (1 is the first). "clear" empties the list. ' +
-        'Answers with the numbered list.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          action: { type: 'string', enum: ['add', 'start', 'done', 'clear'] },
-          titles: { type: 'array', items: { type: 'string' }, description: 'For "add": one short title per step.' },
-          number: { type: 'integer', minimum: 1, description: 'For "start" and "done": the todo\'s number.' },
-        },
-        required: ['action'],
-      },
-    })
-    await syncPlace($)
+    await $.command.register(COMMAND_SPEC)
+    await $.tool.register(TOOL_SPEC)
+    await syncPlace(ports($))
     spinner?.cancel()
     spinner = $.clock.every(SPIN_MS, () => {
       void (async () => {
@@ -457,40 +80,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'todos' }, async ($, e) => {
-    // Plain "/todos" toggles; "add" and "clear" always leave the pane open.
-    if (e.args.trim() === '' && (await isPaneOpen($))) {
-      await $.ui.close({ id: TODO_PANE })
-      return { text: 'Todo panel closed. Claude no longer commits after each todo.' }
-    }
-    await syncPlace($)
-    await refreshEarlier($)
-    await refreshDropped($)
-    await openPane($, { title: 'Todos' })
-
-    if (/^clear$/i.test(e.args.trim())) {
-      const count = (await read($, todos)).length
-      await runTodosTool($, { action: 'clear' })
-      return { text: `Cleared ${count} ${count === 1 ? 'todo' : 'todos'}. The list is empty now; old todo numbers no longer apply.` }
-    }
-
-    const adding = e.args.trim().match(/^add(?:\s+([\s\S]*))?$/i)
-    if (adding === null) {
-      return { text: 'Todo panel opened. Claude will commit after each todo while it is open.' }
-    }
-    const title = adding[1]?.trim() ?? ''
-    if (title === '') {
-      return { text: 'Nothing added. Write the todo after "add", like: /todos add Bump the theme version' }
-    }
-    await runTodosTool($, { action: 'add', titles: [title] })
-    const added = (await read($, todos)).at(-1)
-    const count = (await read($, todos)).length
-    // The row shows the typed words at once; the tidy title replaces them when it comes.
-    const tidy = await tidyTitle($, title)
-    if (added !== undefined && tidy !== undefined) {
-      await changeTodos($, list => list.map(todo => (todo.id === added.id ? { ...todo, title: tidy } : todo)))
-    }
-
-    return { text: `Added todo ${count}: ${tidy ?? title}` }
+    return { text: await runCommand(ports($), e.args) }
   })
 
   on('ui.close', async ($, e, next) => {
@@ -499,7 +89,7 @@ export const register: Register = on => {
     }
     // Esc or the close mark on a commit goes back to the list instead of closing.
     if (e.origin.kind === 'person' && (await read($, commit)) !== null) {
-      await backToList($)
+      await backToList(ports($))
       return { value: undefined }
     }
     await update($, commit, () => null)
@@ -507,11 +97,13 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The loader reads hook filters from this file only: keep this name written out, not TOOL from config.
   on('tool.call', { tool: 'mcp__todo-commits__todos' }, async ($, e) => {
-    const answer = await runTodosTool($, e as TodosInput)
+    const p = ports($)
+    const answer = await runTool(p, e as TodosInput)
     // Claude is changing the list: show it, so its one-line rows never stand alone.
-    if (!(await isPaneOpen($))) {
-      await openPane($, { title: 'Todos' })
+    if (!(await p.isPaneOpen())) {
+      await p.openPane({ title: 'Todos' })
     }
 
     return answer.isError ? { result: answer.text, isError: true as const } : { result: answer.text }
@@ -522,10 +114,11 @@ export const register: Register = on => {
     if (ran.result === undefined || ran.isError) {
       return ran
     }
-    const hadTodos = (await read($, todos)).length > 0
+    const p = ports($)
+    const hadTodos = (await p.todos.get()).length > 0
     const { id, subject } = ran.result.task
-    await changeTodos($, list => [...list, { id, title: subject, status: 'pending' as const, commits: [] }])
-    await openIfNew($, hadTodos)
+    await changeTodos(p, list => [...list, { id, title: subject, status: 'pending' as const, commits: [] }])
+    await openIfNew(p, hadTodos)
 
     return ran
   })
@@ -535,12 +128,12 @@ export const register: Register = on => {
     if (ran.result === undefined || ran.isError) {
       return ran
     }
+    const p = ports($)
     if (e.status !== undefined) {
-      await setStatus($, e.taskId, e.status, e.subject)
+      await changeStatus(p, e.taskId, e.status, e.subject)
     } else if (e.subject !== undefined) {
-      await changeTodos($, list =>
-        list.map(todo => (todo.id === e.taskId ? { ...todo, title: e.subject ?? todo.title } : todo)),
-      )
+      const subject = e.subject
+      await changeTodos(p, list => renameTodo(list, e.taskId, subject))
     }
 
     return ran
@@ -551,37 +144,29 @@ export const register: Register = on => {
     if (ran.result === undefined || ran.isError) {
       return ran
     }
-    const previous = await read($, todos)
-    const nextList: Todo[] = e.todos.map(item => ({
-      id: item.content,
-      title: item.content,
-      status: item.status,
-      commits: previous.find(todo => todo.id === item.content)?.commits ?? [],
-    }))
-    await changeTodos($, () => nextList)
+    const p = ports($)
+    const previous = await p.todos.get()
+    const nextList = fromTodoWrite(previous, e.todos)
+    await changeTodos(p, () => nextList)
     const active = nextList.find(todo => todo.status === 'in_progress')
     if (active !== undefined) {
-      await update($, lastActiveId, () => active.id)
+      await p.lastActiveId.update(() => active.id)
     }
-    await openIfNew($, previous.length > 0)
+    await openIfNew(p, previous.length > 0)
 
     return ran
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    const isMoved = !(await syncPlace($)) && (await linkNewCommits($))
-    if (isMoved) {
-      await refreshEarlier($)
-      await refreshDropped($)
-    }
+    await afterBash(ports($))
 
     return ran
   })
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
-    if (!(await isPaneOpen($))) {
+    if (!(await ports($).isPaneOpen())) {
       return composed
     }
 
@@ -593,292 +178,55 @@ export const register: Register = on => {
     }
   })
 
-  on('ui.render', { component: 'Pane', requestId: TODO_PANE }, async ($, e) => {
-    const { Box, Text, Button, Code } = $.ui.resolve(e)
+  // Written out for the loader, like the tool name above: this is TODO_PANE.
+  on('ui.render', { component: 'Pane', requestId: 'todo-commits' }, async ($, e) => {
+    const parts = $.ui.resolve(e)
     const view = await read($, commit)
     if (view !== null) {
-      const added = view.files.reduce((sum, file) => sum + file.added, 0)
-      const removed = view.files.reduce((sum, file) => sum + file.removed, 0)
-
-      const drawPiece = (file: CommitFile, piece: DiffPiece, i: number) =>
-        piece.kind === 'diff' ? (
-          <Code key={`d-${file.path}-${i}`} source={piece.text} path={file.path} format="diff" />
-        ) : (
-          <Box key={`p-${file.path}-${i}`} flexDirection="column">
-            {piece.text.split('\n').map((line, j) => (
-              <Text
-                key={`l-${file.path}-${i}-${j}`}
-                wrap="truncate-end"
-                color={line.startsWith('+') ? 'green' : line.startsWith('-') ? 'red' : undefined}
-                dimColor={line.startsWith('@@')}
-              >
-                {line === '' ? ' ' : line}
-              </Text>
-            ))}
-          </Box>
-        )
-
-      return (
-        <Box flexDirection="column">
-          <Box flexDirection="row" justifyContent="space-between">
-            <Box key="summary">
-              <Text bold color="yellow">
-                {view.kind === 'working' ? 'Uncommitted' : view.hash.slice(0, 7)}
-              </Text>
-              <Text dimColor>
-                {' '}· {view.files.length} {view.files.length === 1 ? 'file' : 'files'} ·{' '}
-              </Text>
-              <Text color="green">+{added}</Text>
-              <Text> </Text>
-              <Text color="red">−{removed}</Text>
-            </Box>
-            <Button key="back" label="← Back to todos" onPress={() => backToList($)} />
-          </Box>
-          <Box marginY={1}>
-            <Text>{view.message}</Text>
-          </Box>
-          {view.files.map(file => (
-            <Box key={`f-${file.path}`} flexDirection="column" marginBottom={1}>
-              <Box flexDirection="row">
-                <Text bold>{file.path}</Text>
-                <Text color="green"> +{file.added}</Text>
-                <Text color="red"> −{file.removed}</Text>
-              </Box>
-              {file.isLarge && (
-                <Box flexDirection="column">
-                  {file.verdict !== undefined ? (
-                    <Text color={file.verdict.isWorth ? 'cyan' : 'yellow'}>
-                      {file.verdict.isWorth ? 'Worth a look: ' : 'Probably skip: '}
-                      {file.verdict.reason}
-                    </Text>
-                  ) : (
-                    <Text dimColor>
-                      Large diff ({file.added + file.removed} lines changed).
-                      {view.isChecking ? ' Checking whether it is worth reading…' : ''}
-                    </Text>
-                  )}
-                  <Button
-                    key={`t-${file.path}`}
-                    label={file.isOpen ? 'Hide diff' : 'Show diff'}
-                    onPress={() => toggleFile($, view.hash, file.path)}
-                  />
-                </Box>
-              )}
-              {file.isOpen && file.pieces.length === 0 && (
-                <Text dimColor>(no text changes: binary, renamed or mode change)</Text>
-              )}
-              {file.isOpen && file.pieces.map((piece, i) => drawPiece(file, piece, i))}
-              {file.isOpen && file.cutLines > 0 && (
-                <Text dimColor>
-                  {file.cutLines} more lines not shown. Run:{' '}
-                  {view.kind === 'working' ? 'git diff HEAD' : `git show ${view.hash.slice(0, 7)}`} -- {file.path}
-                </Text>
-              )}
-            </Box>
-          ))}
-        </Box>
-      )
+      return drawCommitPane(parts, view, {
+        back: () => backToList(ports($)),
+        toggle: (hash, path) => toggleFile(ports($), hash, path),
+      })
     }
     const list = await read($, todos)
-    const here = await read($, place)
-    const before = await read($, earlier)
     const isWorking = list.some(todo => todo.status === 'in_progress')
-    const spin = SPINNER[isWorking ? (await read($, frame)) % SPINNER.length : 0]
 
-    const columns = e.props.bodyColumns ?? 60
-    // icon + space, "12: ", title, space, a 9-wide hash or tag slot
-    const titleWidth = Math.max(8, columns - 2 - 4 - 1 - 9 - 1)
-    const done = list.filter(todo => todo.status === 'completed').length
-    const barLength = Math.min(10, Math.max(list.length, 1))
-    const filled = list.length === 0 ? 0 : Math.round((done / list.length) * barLength)
-
-    const linked = new Set(list.flatMap(todo => todo.commits))
-    const earlierCommits = before?.commits.filter(c => !linked.has(c.hash)) ?? []
-    const earlierTotal = before === null ? 0 : before.total - (before.commits.length - earlierCommits.length)
-    const isOpen = await read($, isEarlierOpen)
-    const gone = new Set(await read($, dropped))
-
-    return (
-      <Box flexDirection="column">
-        <Box flexDirection="row" marginBottom={1}>
-          {here !== null && <Text color="cyan">🌿 {here.branch}  </Text>}
-          {list.length > 0 && (
-            <Box flexDirection="row">
-              <Text color="green">{'▰'.repeat(filled)}</Text>
-              <Text dimColor>{'▱'.repeat(barLength - filled)}</Text>
-              <Text bold> {done}/{list.length}</Text>
-            </Box>
-          )}
-        </Box>
-
-        {list.length === 0 && (
-          <Box flexDirection="column">
-            <Text dimColor>No todos yet. Try:</Text>
-            {TIPS.map(([say, does]) => (
-              <Box key={`tip-${say}`} flexDirection="row" paddingLeft={2}>
-                <Text color="cyan">{fit(say, 26)}</Text>
-                <Text dimColor>{does}</Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        {list.map((todo, i) => {
-          const n = i + 1
-          const latest = todo.commits.at(-1)
-          const older = todo.commits.slice(0, -1)
-          const isMissing = todo.status === 'completed' && latest === undefined
-          const icon =
-            todo.status === 'pending' ? '☐' : todo.status === 'in_progress' ? spin : isMissing ? '⚠' : '✔'
-          const iconColor =
-            todo.status === 'pending' ? undefined : todo.status === 'in_progress' || isMissing ? 'yellow' : 'green'
-          const title = fit(todo.title, titleWidth)
-          const number = n <= 9 ? `${n}: ` : `${n}:`
-
-          return (
-            <Box key={`todo-${todo.id}`} flexDirection="column">
-              <Box key={`row-${todo.id}`} flexDirection="row">
-                <Text color={iconColor} dimColor={todo.status === 'pending'} bold={todo.status === 'in_progress'}>
-                  {icon}{' '}
-                </Text>
-                {latest === undefined && todo.status === 'in_progress' ? (
-                  <Button
-                    key={`w-${todo.id}`}
-                    label={`${n <= 9 ? '' : number}${title} —`}
-                    plain
-                    hotkey={n <= 9 ? String(n) : undefined}
-                    hover={{ color: 'cyan' }}
-                    onPress={() => showWorking($)}
-                  />
-                ) : latest === undefined ? (
-                  <Box flexDirection="row">
-                    <Text dimColor={todo.status !== 'in_progress'} bold={todo.status === 'in_progress'}>
-                      {number}
-                      {title}{' '}
-                    </Text>
-                    {isMissing ? <Text color="yellow">no commit</Text> : <Text dimColor>—</Text>}
-                  </Box>
-                ) : gone.has(latest) ? (
-                  <Box flexDirection="row">
-                    <Button
-                      key={`c-${todo.id}-${latest}`}
-                      label={`${n <= 9 ? '' : number}${title} `}
-                      plain
-                      hotkey={n <= 9 ? String(n) : undefined}
-                      hover={{ color: 'cyan' }}
-                      onPress={() => showCommit($, latest)}
-                    />
-                    <Text color="red">dropped</Text>
-                  </Box>
-                ) : (
-                  <Button
-                    key={`c-${todo.id}-${latest}`}
-                    label={`${n <= 9 ? '' : number}${title} ${latest.slice(0, 7)}`}
-                    plain
-                    hotkey={n <= 9 ? String(n) : undefined}
-                    hover={{ color: 'cyan' }}
-                    onPress={() => showCommit($, latest)}
-                  />
-                )}
-              </Box>
-              {older.length > 0 && (
-                <Box flexDirection="row" columnGap={1} paddingLeft={6}>
-                  <Text dimColor>also</Text>
-                  {older.map(hash => (
-                    <Box key={`c-row-${todo.id}-${hash}`}>
-                      <Button
-                        key={`c-${todo.id}-${hash}`}
-                        label={hash.slice(0, 7)}
-                        plain
-                        hover={{ color: 'cyan' }}
-                        onPress={() => showCommit($, hash)}
-                      />
-                    </Box>
-                  ))}
-                </Box>
-              )}
-            </Box>
-          )
-        })}
-
-        {earlierTotal > 0 && before !== null && (
-          <Box flexDirection="column" marginTop={1}>
-            <Box key="earlier-row">
-              <Button
-                key="earlier"
-                label={`${isOpen ? '▾' : '▸'} Earlier on this branch · ${earlierTotal} ${earlierTotal === 1 ? 'commit' : 'commits'}`}
-                plain
-                dimColor
-                hover={{ color: 'cyan' }}
-                onPress={() => update($, isEarlierOpen, value => !value)}
-              />
-            </Box>
-            {isOpen &&
-              earlierCommits.map(c => (
-                <Box key={`e-row-${c.hash}`}>
-                  <Button
-                    key={`e-${c.hash}`}
-                    label={`  ${c.hash.slice(0, 7)}  ${fit(c.subject, Math.max(8, columns - 12))}`}
-                    plain
-                    hover={{ color: 'cyan' }}
-                    onPress={() => showCommit($, c.hash)}
-                  />
-                </Box>
-              ))}
-            {isOpen && earlierTotal > earlierCommits.length && (
-              <Text dimColor>
-                {'  '}and {earlierTotal - earlierCommits.length} more (since {before.base})
-              </Text>
-            )}
-          </Box>
-        )}
-        {list.length > 0 && (
-          <Box marginTop={1}>
-            <Text dimColor>Tip: "add a todo: …" · "go" to start · /todos add … · /todos clear</Text>
-          </Box>
-        )}
-      </Box>
+    return drawListPane(
+      parts,
+      {
+        list,
+        here: await read($, place),
+        before: await read($, earlier),
+        spin: SPINNER[isWorking ? (await read($, frame)) % SPINNER.length : 0] ?? '',
+        columns: e.props.bodyColumns ?? 60,
+        isEarlierOpen: await read($, isEarlierOpen),
+        gone: new Set(await read($, dropped)),
+      },
+      {
+        showCommit: hash => showCommit(ports($), hash),
+        showWorking: () => showWorking(ports($)),
+        toggleEarlier: async () => {
+          await update($, isEarlierOpen, value => !value)
+        },
+      },
     )
   })
 
   // The todo tool's calls draw as one line; the pane shows the list itself.
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     const { tool, input, isErrored, isInterrupted } = e.props
-    if (tool !== 'mcp__todo-commits__todos' || isErrored || isInterrupted) {
+    if (tool !== TOOL || isErrored || isInterrupted) {
       return next(e)
     }
-    const { Box, Text } = $.ui.resolve(e)
-    const { action, titles, number } = (input ?? {}) as TodosInput
-    const list = await read($, todos)
-    const todo = typeof number === 'number' ? list[number - 1] : undefined
-    const names = Array.isArray(titles) ? titles.filter((t): t is string => typeof t === 'string') : []
-    const hash = todo?.commits.at(-1)?.slice(0, 7)
 
-    const [icon, color, text] =
-      action === 'add'
-        ? ['☐', undefined, names.length === 1 ? `Added: ${names[0]}` : `Added ${names.length} todos: ${names[0] ?? ''}…`]
-        : action === 'start'
-          ? ['▸', 'yellow', `Started ${String(number)}: ${todo?.title ?? ''}`]
-          : action === 'done'
-            ? ['✔', 'green', `Done ${String(number)}: ${todo?.title ?? ''}${hash === undefined ? '' : ` · ${hash}`}`]
-            : ['⊘', undefined, 'Cleared the todos']
-
-    return (
-      <Box flexDirection="row">
-        <Text color={color}>{icon} </Text>
-        <Text dimColor wrap="truncate-end">
-          {text}
-        </Text>
-      </Box>
-    )
+    return drawToolRow($.ui.resolve(e), toolRowLine((input ?? {}) as TodosInput, await read($, todos)))
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
-    if (e.props.tool !== 'mcp__todo-commits__todos' || e.props.isErrored) {
+    if (e.props.tool !== TOOL || e.props.isErrored) {
       return next(e)
     }
-    const { Box } = $.ui.resolve(e)
 
-    return <Box />
+    return drawEmptyResult($.ui.resolve(e))
   })
 }

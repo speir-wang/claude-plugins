@@ -45,6 +45,16 @@ type Repo = {
   gone: string[]
   workingDiff: string
   untracked: string[]
+  /** What `origin/HEAD` points at (like `origin/main`); undefined fails that command. */
+  originHead?: string
+  /** The branch's commit count when it is bigger than the listed `earlier`. */
+  earlierTotal?: number
+  /** True for a folder that is not a git repo: every git command fails. */
+  isNotRepo?: boolean
+  /** The model's raw answer to the "worth reading" question; undefined keeps the default verdict. */
+  verdictReply?: string
+  /** True when the model gives no answer to the "worth reading" question. */
+  isVerdictMissing?: boolean
 }
 
 /** A fake repo whose HEAD the test moves, and a fake tool layer beneath the plugin. */
@@ -55,12 +65,13 @@ function world(on: On, show = SHOW, stored: Record<string, unknown> = {}) {
     const [, cmd, ...rest] = e.argv
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     const fail = { value: { exitCode: 1, stdout: '', stderr: 'no', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (repo.isNotRepo) return fail
     if (cmd === 'rev-parse' && rest[0] === '--show-toplevel') return ok(`${repo.top}\n`)
     if (cmd === 'rev-parse' && rest[0] === '--abbrev-ref') return ok(`${repo.branch}\n`)
     if (cmd === 'rev-parse' && rest[0] === '--verify') return rest.at(-1) === repo.base ? ok(`${A}\n`) : fail
     if (cmd === 'rev-parse') return ok(`${repo.head}\n`)
-    if (cmd === 'symbolic-ref') return fail
-    if (cmd === 'rev-list' && rest[0] === '--count') return ok(`${repo.earlier.length}\n`)
+    if (cmd === 'symbolic-ref') return repo.originHead === undefined ? fail : ok(`${repo.originHead}\n`)
+    if (cmd === 'rev-list' && rest[0] === '--count') return ok(`${repo.earlierTotal ?? repo.earlier.length}\n`)
     if (cmd === 'rev-list') {
       const from = rest.at(-1)!.split('..')[0]!
       return ok(repo.log.slice(repo.log.indexOf(from) + 1).join('\n') + '\n')
@@ -107,7 +118,8 @@ function world(on: On, show = SHOW, stored: Record<string, unknown> = {}) {
         : ({ value: { isAnswered: true, text: repo.tidy, usage } } as never)
     }
     repo.asked += 1
-    const text = '[{"path": "tests/__snapshots__/app.snap", "isWorth": false, "reason": "Generated snapshot output."}]'
+    if (repo.isVerdictMissing) return { value: { isAnswered: false, reason: 'aborted', usage } } as never
+    const text = repo.verdictReply ?? '[{"path": "tests/__snapshots__/app.snap", "isWorth": false, "reason": "Generated snapshot output."}]'
     return { value: { isAnswered: true, text, usage } } as never
   })
   on('tool.call', ($, e) => {
@@ -611,4 +623,200 @@ test('/todos toggles the panel; add and clear never close it', async ($, on) => 
   await $.command.run({ command: 'todos', args: 'add Keep it open' } as never)
   await $.command.run({ command: 'todos', args: 'clear' } as never)
   expect(repo.opened.includes('todo-commits')).toBe(true)
+})
+
+test('TodoWrite fills the list, keeps commits for kept items, and opens the panel', async ($, on) => {
+  const repo = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const write = (todos: { content: string; status: string; activeForm: string }[]) =>
+    $.tool.call({ tool: 'TodoWrite', tool_use_id: 'w', todos } as never)
+
+  await write([
+    { content: 'Change x', status: 'in_progress', activeForm: 'Changing x' },
+    { content: 'Change y', status: 'pending', activeForm: 'Changing y' },
+  ])
+  expect(repo.opened).toContain('todo-commits')
+  const pane = await $.ui.mount({ plugin: 'todo-commits', surface: 'terminal', component: 'Pane', requestId: 'todo-commits', props: PANE_PROPS })
+  const hashes = async () => (await pane.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith('c-Change x-')).map(k => k!.slice(11))
+  expect((await pane.findAll({ type: 'Button' })).map(b => squash(b.props.label))).toEqual(['Change x —'])
+  expect((await pane.findAll({ type: 'Text' })).map(t => squash(t.text))).toContain('2: Change y')
+
+  repo.log.push(B)
+  repo.head = B
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'git commit -m x' } as never)
+  expect(await hashes()).toEqual([B])
+
+  // Todo 1 finishes: it keeps its commit, and a later commit still goes to it.
+  await write([
+    { content: 'Change x', status: 'completed', activeForm: 'Changing x' },
+    { content: 'Change y', status: 'pending', activeForm: 'Changing y' },
+  ])
+  expect(await hashes()).toEqual([B])
+  repo.log.push(C)
+  repo.head = C
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'git commit -m y' } as never)
+  expect((await hashes()).sort()).toEqual([B, C])
+})
+
+test('closing the pane any other way clears the commit view and closes it', async ($, on) => {
+  const { pane, repo } = await openCommit($, on, SHOW)
+  expect((await pane.find({ key: 'back' })) !== undefined).toBe(true)
+
+  // The test kit cannot send a close made by the person (Esc), so the Back button
+  // stands in for that path, and the /todos toggle is a close made by a plugin.
+  await pane.press({ key: 'back' })
+  expect((await pane.find({ key: 'back' })) === undefined).toBe(true)
+  expect(repo.opened).toContain('todo-commits')
+
+  await pane.press({ key: (await pane.findAll({ type: 'Button' }))[0]!.key! })
+  expect((await pane.find({ key: 'back' })) !== undefined).toBe(true)
+  await $.command.run({ command: 'todos', args: '' } as never)
+  expect(repo.opened).toEqual([])
+  repo.opened = ['todo-commits']
+  expect((await pane.find({ key: 'back' })) === undefined).toBe(true)
+})
+
+test('outside a git repo todos still work, nothing is saved and no commits are linked', async ($, on) => {
+  const repo = world(on)
+  repo.isNotRepo = true
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: TODOS, tool_use_id: 'u1', action: 'add', titles: ['No repo here'] } as never)
+  await $.tool.call({ tool: TODOS, tool_use_id: 'u2', action: 'start', number: 1 } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u3', command: 'git commit -m x' } as never)
+
+  const drawn = await rows($)
+  expect(drawn.texts).toContain('0/1')
+  expect(drawn.texts.some(t => t.includes('🌿'))).toBe(false)
+  expect(drawn.buttons).toEqual(['1: No repo here —'])
+  expect(repo.data).toEqual({})
+})
+
+test('TaskUpdate renames a todo with a subject alone and removes it when deleted', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'TaskCreate', tool_use_id: 't1', subject: 'Old name', description: '' } as never)
+
+  await $.tool.call({ tool: 'TaskUpdate', tool_use_id: 't2', taskId: '1', subject: 'New name' } as never)
+  const pane = await $.ui.mount({ plugin: 'todo-commits', surface: 'terminal', component: 'Pane', requestId: 'todo-commits', props: PANE_PROPS })
+  const texts = async () => (await pane.findAll({ type: 'Text' })).map(t => squash(t.text))
+  expect(await texts()).toContain('1: New name')
+  expect(await texts()).not.toContain('1: Old name')
+
+  await $.tool.call({ tool: 'TaskUpdate', tool_use_id: 't3', taskId: '1', status: 'deleted' } as never)
+  expect(await texts()).toContain('No todos yet. Try:')
+})
+
+for (const [name, reply, isMissing] of [
+  ['is not JSON', 'I think the snapshot is fine.', false],
+  ['is missing', undefined, true],
+] as const) {
+  test(`a model reply that ${name} leaves a large file without a verdict`, async ($, on) => {
+    const snap = fileDiff('tests/__snapshots__/app.snap', [hunk(1, 250, 20)])
+    const repo = world(on, SHOW + snap)
+    repo.verdictReply = reply
+    repo.isVerdictMissing = isMissing
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+    await $.tool.call({ tool: TODOS, tool_use_id: 'u1', action: 'add', titles: ['Big change'] } as never)
+    await $.tool.call({ tool: TODOS, tool_use_id: 'u2', action: 'start', number: 1 } as never)
+    repo.log.push(B)
+    repo.head = B
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u3', command: 'git commit -m x' } as never)
+    const pane = await $.ui.mount({ plugin: 'todo-commits', surface: 'terminal', component: 'Pane', requestId: 'todo-commits', props: PANE_PROPS })
+    await pane.press({ key: (await pane.findAll({ type: 'Button' }))[0]!.key! })
+
+    expect(repo.asked).toBe(1)
+    const texts = (await pane.findAll({ type: 'Text' })).map(t => squash(t.text))
+    expect(texts).toContain('Large diff (500 lines changed).')
+    expect(texts.some(t => t.includes('Checking'))).toBe(false)
+    expect(texts.some(t => t.includes('Probably skip') || t.includes('Worth a look'))).toBe(false)
+  })
+}
+
+test('the main branch can come from origin/HEAD, with the origin/ prefix stripped', async ($, on) => {
+  const repo = world(on)
+  repo.originHead = 'origin/main'
+  repo.base = 'origin/main'
+  repo.earlier = [{ hash: C, subject: 'Older work' }]
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ plugin: 'todo-commits', surface: 'terminal', component: 'Pane', requestId: 'todo-commits', props: PANE_PROPS })
+  expect((await pane.find({ key: 'earlier' }))?.props.label).toBe('▸ Earlier on this branch · 1 commit')
+})
+
+test('on main itself there is no earlier section when the base comes from origin/HEAD', async ($, on) => {
+  const repo = world(on)
+  repo.originHead = 'origin/main'
+  repo.branch = 'main'
+  repo.earlier = [{ hash: C, subject: 'x' }]
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount({ plugin: 'todo-commits', surface: 'terminal', component: 'Pane', requestId: 'todo-commits', props: PANE_PROPS })
+  expect(await pane.find({ key: 'earlier' })).toBe(undefined)
+})
+
+test('the earlier section hides linked commits, shrinks its count and says how many more', async ($, on) => {
+  const repo = world(on)
+  repo.base = 'main'
+  const hash = (n: number) => String(n).padStart(2, '0').repeat(20)
+  repo.earlier = Array.from({ length: 20 }, (_, i) => ({ hash: hash(i + 10), subject: `Commit ${i}` }))
+  repo.earlierTotal = 25
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: TODOS, tool_use_id: 'u1', action: 'add', titles: ['Linked'] } as never)
+  await $.tool.call({ tool: TODOS, tool_use_id: 'u2', action: 'start', number: 1 } as never)
+  repo.log.push(hash(10), hash(11))
+  repo.head = hash(11)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u3', command: 'git commit' } as never)
+
+  const pane = await $.ui.mount({ plugin: 'todo-commits', surface: 'terminal', component: 'Pane', requestId: 'todo-commits', props: PANE_PROPS })
+  expect((await pane.find({ key: 'earlier' }))?.props.label).toBe('▸ Earlier on this branch · 23 commits')
+  await pane.press({ key: 'earlier' })
+  const shown = (await pane.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('e-'))
+  expect(shown.length).toBe(18)
+  expect((await pane.find({ key: `e-${hash(10)}` })) === undefined).toBe(true)
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => squash(t.text))
+  expect(texts).toContain('and 5 more (since main)')
+})
+
+test('25 new files: 20 are drawn and the rest are counted', async ($, on) => {
+  const repo = await editUnderTodo($, on)
+  repo.untracked = Array.from({ length: 25 }, (_, i) => `src/new${i}.js`)
+  const pane = await $.ui.mount({ plugin: 'todo-commits', surface: 'terminal', component: 'Pane', requestId: 'todo-commits', props: PANE_PROPS })
+  await pane.press({ key: (await pane.findAll({ type: 'Button' }))[0]!.key! })
+
+  const codes = await pane.findAll({ type: 'Code' })
+  expect(codes.length).toBe(21)
+  const texts = (await pane.findAll({ type: 'Text' })).map(t => squash(t.text))
+  expect(texts.some(t => t.endsWith('5 more new files not shown.'))).toBe(true)
+})
+
+test('tool errors: no usable titles and an unknown action leave the list alone', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: TODOS, tool_use_id: 'u1', action: 'add', titles: ['Keep'] } as never)
+
+  const empty = await $.tool.call({ tool: TODOS, tool_use_id: 'u2', action: 'add', titles: ['  ', 3] } as never)
+  expect(empty.isError).toBe(true)
+  expect(empty.text ?? String(empty.result)).toBe('Nothing added: "titles" needs at least one title.')
+  const unknown = await $.tool.call({ tool: TODOS, tool_use_id: 'u3', action: 'explode' } as never)
+  expect(unknown.isError).toBe(true)
+  expect(unknown.text ?? String(unknown.result)).toBe('Unknown action. Use "add", "start", "done" or "clear".')
+  const drawn = await rows($)
+  expect(drawn.texts).toContain('0/1')
+  expect(drawn.texts).toContain('1: Keep')
+})
+
+test('from the tenth todo on there is no hotkey and the number shows in the label', async ($, on) => {
+  const repo = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const titles = Array.from({ length: 11 }, (_, i) => `Step ${i + 1}`)
+  await $.tool.call({ tool: TODOS, tool_use_id: 'u1', action: 'add', titles } as never)
+  for (const n of [1, 10, 11]) {
+    await $.tool.call({ tool: TODOS, tool_use_id: `s${n}`, action: 'start', number: n } as never)
+    repo.log.push(String(n).padStart(2, '0').repeat(20))
+    repo.head = repo.log.at(-1)!
+    await $.tool.call({ tool: 'Bash', tool_use_id: `b${n}`, command: 'git commit' } as never)
+    await $.tool.call({ tool: TODOS, tool_use_id: `d${n}`, action: 'done', number: n } as never)
+  }
+  const buttons = (await rows($)).buttons
+  expect(buttons[0]).toMatch(/^1: Step 1 /)
+  expect(buttons[1]).toMatch(/^undefined: 10:Step 10 /)
+  expect(buttons[2]).toMatch(/^undefined: 11:Step 11 /)
 })
