@@ -1,15 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { CommitFile, CommitView, DiffPiece, DiffVerdict, Earlier, Place, Todo, TodoStatus } from '../types'
-
-import { COMMIT_RULE, SPINNER, SPIN_MS, TIPS, TODO_PANE, TOOL } from './config'
+import { COMMIT_RULE, SPINNER, SPIN_MS, TODO_PANE, TOOL } from './config'
 import { changeTodos, setStatus } from './state'
 import type { Ports } from './state'
 import { backToList, showCommit, showWorking, toggleFile } from './commit-view'
 import { COMMAND, TOOL as TOOL_DEF, runCommand, runTool } from './todo-tool'
 import { afterBash, beforeTodosOpen, linkNewCommits, syncPlace } from './sync'
-import { earlierSummary, fit, progressBar, rowLook, toolRowLine } from './ui/rows'
+import { drawCommitPane } from './ui/commit-pane'
+import { drawListPane } from './ui/list-pane'
+import { toolRowLine } from './ui/rows'
+import { drawEmptyResult, drawToolRow } from './ui/tool-row'
 import type { ToolInput } from './ui/rows'
 import { fromTodoWrite, renameTodo } from './todo-list'
 
@@ -183,223 +184,35 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: 'todo-commits' }, async ($, e) => {
-    const { Box, Text, Button, Code } = $.ui.resolve(e)
+    const parts = $.ui.resolve(e)
     const view = await read($, commit)
     if (view !== null) {
-      const added = view.files.reduce((sum, file) => sum + file.added, 0)
-      const removed = view.files.reduce((sum, file) => sum + file.removed, 0)
-
-      const drawPiece = (file: CommitFile, piece: DiffPiece, i: number) =>
-        piece.kind === 'diff' ? (
-          <Code key={`d-${file.path}-${i}`} source={piece.text} path={file.path} format="diff" />
-        ) : (
-          <Box key={`p-${file.path}-${i}`} flexDirection="column">
-            {piece.text.split('\n').map((line, j) => (
-              <Text
-                key={`l-${file.path}-${i}-${j}`}
-                wrap="truncate-end"
-                color={line.startsWith('+') ? 'green' : line.startsWith('-') ? 'red' : undefined}
-                dimColor={line.startsWith('@@')}
-              >
-                {line === '' ? ' ' : line}
-              </Text>
-            ))}
-          </Box>
-        )
-
-      return (
-        <Box flexDirection="column">
-          <Box flexDirection="row" justifyContent="space-between">
-            <Box key="summary">
-              <Text bold color="yellow">
-                {view.kind === 'working' ? 'Uncommitted' : view.hash.slice(0, 7)}
-              </Text>
-              <Text dimColor>
-                {' '}· {view.files.length} {view.files.length === 1 ? 'file' : 'files'} ·{' '}
-              </Text>
-              <Text color="green">+{added}</Text>
-              <Text> </Text>
-              <Text color="red">−{removed}</Text>
-            </Box>
-            <Button key="back" label="← Back to todos" onPress={() => backToList(ports($))} />
-          </Box>
-          <Box marginY={1}>
-            <Text>{view.message}</Text>
-          </Box>
-          {view.files.map(file => (
-            <Box key={`f-${file.path}`} flexDirection="column" marginBottom={1}>
-              <Box flexDirection="row">
-                <Text bold>{file.path}</Text>
-                <Text color="green"> +{file.added}</Text>
-                <Text color="red"> −{file.removed}</Text>
-              </Box>
-              {file.isLarge && (
-                <Box flexDirection="column">
-                  {file.verdict !== undefined ? (
-                    <Text color={file.verdict.isWorth ? 'cyan' : 'yellow'}>
-                      {file.verdict.isWorth ? 'Worth a look: ' : 'Probably skip: '}
-                      {file.verdict.reason}
-                    </Text>
-                  ) : (
-                    <Text dimColor>
-                      Large diff ({file.added + file.removed} lines changed).
-                      {view.isChecking ? ' Checking whether it is worth reading…' : ''}
-                    </Text>
-                  )}
-                  <Button
-                    key={`t-${file.path}`}
-                    label={file.isOpen ? 'Hide diff' : 'Show diff'}
-                    onPress={() => toggleFile(ports($), view.hash, file.path)}
-                  />
-                </Box>
-              )}
-              {file.isOpen && file.pieces.length === 0 && (
-                <Text dimColor>(no text changes: binary, renamed or mode change)</Text>
-              )}
-              {file.isOpen && file.pieces.map((piece, i) => drawPiece(file, piece, i))}
-              {file.isOpen && file.cutLines > 0 && (
-                <Text dimColor>
-                  {file.cutLines} more lines not shown. Run:{' '}
-                  {view.kind === 'working' ? 'git diff HEAD' : `git show ${view.hash.slice(0, 7)}`} -- {file.path}
-                </Text>
-              )}
-            </Box>
-          ))}
-        </Box>
-      )
+      return drawCommitPane(parts, view, {
+        back: () => backToList(ports($)),
+        toggle: (hash, path) => toggleFile(ports($), hash, path),
+      })
     }
     const list = await read($, todos)
-    const here = await read($, place)
-    const before = await read($, earlier)
     const isWorking = list.some(todo => todo.status === 'in_progress')
-    const spin = SPINNER[isWorking ? (await read($, frame)) % SPINNER.length : 0]
 
-    const columns = e.props.bodyColumns ?? 60
-    // icon + space, "12: ", title, space, a 9-wide hash or tag slot
-    const titleWidth = Math.max(8, columns - 2 - 4 - 1 - 9 - 1)
-    const { filled, empty, done, total } = progressBar(list)
-    const { commits: earlierCommits, total: earlierTotal, more } = earlierSummary(before, list)
-    const isOpen = await read($, isEarlierOpen)
-    const gone = new Set(await read($, dropped))
-
-    return (
-      <Box flexDirection="column">
-        <Box flexDirection="row" marginBottom={1}>
-          {here !== null && <Text color="cyan">🌿 {here.branch}  </Text>}
-          {list.length > 0 && (
-            <Box flexDirection="row">
-              <Text color="green">{'▰'.repeat(filled)}</Text>
-              <Text dimColor>{'▱'.repeat(empty)}</Text>
-              <Text bold> {done}/{total}</Text>
-            </Box>
-          )}
-        </Box>
-
-        {list.length === 0 && (
-          <Box flexDirection="column">
-            <Text dimColor>No todos yet. Try:</Text>
-            {TIPS.map(([say, does]) => (
-              <Box key={`tip-${say}`} flexDirection="row" paddingLeft={2}>
-                <Text color="cyan">{fit(say, 26)}</Text>
-                <Text dimColor>{does}</Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        {list.map((todo, i) => {
-          const look = rowLook(todo, i + 1, spin ?? '', gone.has(todo.commits.at(-1) ?? ''), titleWidth)
-          const older = todo.commits.slice(0, -1)
-          const opens = look.opens
-          const button =
-            opens === null ? null : (
-              <Button
-                key={look.key}
-                label={look.label}
-                plain
-                hotkey={look.hotkey}
-                hover={{ color: 'cyan' }}
-                onPress={() => (opens.kind === 'working' ? showWorking(ports($)) : showCommit(ports($), opens.hash))}
-              />
-            )
-
-          return (
-            <Box key={`todo-${todo.id}`} flexDirection="column">
-              <Box key={`row-${todo.id}`} flexDirection="row">
-                <Text color={look.iconColor} dimColor={todo.status === 'pending'} bold={todo.status === 'in_progress'}>
-                  {look.icon}{' '}
-                </Text>
-                {button === null ? (
-                  <Box flexDirection="row">
-                    <Text dimColor>{look.label}</Text>
-                    {look.tag?.color === undefined ? <Text dimColor>{look.tag?.text}</Text> : <Text color={look.tag.color}>{look.tag.text}</Text>}
-                  </Box>
-                ) : look.tag === null ? (
-                  button
-                ) : (
-                  <Box flexDirection="row">
-                    {button}
-                    <Text color={look.tag.color}>{look.tag.text}</Text>
-                  </Box>
-                )}
-              </Box>
-              {older.length > 0 && (
-                <Box flexDirection="row" columnGap={1} paddingLeft={6}>
-                  <Text dimColor>also</Text>
-                  {older.map(hash => (
-                    <Box key={`c-row-${todo.id}-${hash}`}>
-                      <Button
-                        key={`c-${todo.id}-${hash}`}
-                        label={hash.slice(0, 7)}
-                        plain
-                        hover={{ color: 'cyan' }}
-                        onPress={() => showCommit(ports($), hash)}
-                      />
-                    </Box>
-                  ))}
-                </Box>
-              )}
-            </Box>
-          )
-        })}
-
-        {earlierTotal > 0 && before !== null && (
-          <Box flexDirection="column" marginTop={1}>
-            <Box key="earlier-row">
-              <Button
-                key="earlier"
-                label={`${isOpen ? '▾' : '▸'} Earlier on this branch · ${earlierTotal} ${earlierTotal === 1 ? 'commit' : 'commits'}`}
-                plain
-                dimColor
-                hover={{ color: 'cyan' }}
-                onPress={() => update($, isEarlierOpen, value => !value)}
-              />
-            </Box>
-            {isOpen &&
-              earlierCommits.map(c => (
-                <Box key={`e-row-${c.hash}`}>
-                  <Button
-                    key={`e-${c.hash}`}
-                    label={`  ${c.hash.slice(0, 7)}  ${fit(c.subject, Math.max(8, columns - 12))}`}
-                    plain
-                    hover={{ color: 'cyan' }}
-                    onPress={() => showCommit(ports($), c.hash)}
-                  />
-                </Box>
-              ))}
-            {isOpen && more > 0 && (
-              <Text dimColor>
-                {'  '}and {more} more (since {before.base})
-              </Text>
-            )}
-          </Box>
-        )}
-        {list.length > 0 && (
-          <Box marginTop={1}>
-            <Text dimColor>Tip: "add a todo: …" · "go" to start · /todos add … · /todos clear</Text>
-          </Box>
-        )}
-      </Box>
+    return drawListPane(
+      parts,
+      {
+        list,
+        here: await read($, place),
+        before: await read($, earlier),
+        spin: SPINNER[isWorking ? (await read($, frame)) % SPINNER.length : 0] ?? '',
+        columns: e.props.bodyColumns ?? 60,
+        isEarlierOpen: await read($, isEarlierOpen),
+        gone: new Set(await read($, dropped)),
+      },
+      {
+        showCommit: hash => showCommit(ports($), hash),
+        showWorking: () => showWorking(ports($)),
+        toggleEarlier: async () => {
+          await update($, isEarlierOpen, value => !value)
+        },
+      },
     )
   })
 
@@ -409,25 +222,15 @@ export const register: Register = on => {
     if (tool !== TOOL || isErrored || isInterrupted) {
       return next(e)
     }
-    const { Box, Text } = $.ui.resolve(e)
-    const { icon, color, text } = toolRowLine((input ?? {}) as ToolInput, await read($, todos))
 
-    return (
-      <Box flexDirection="row">
-        <Text color={color}>{icon} </Text>
-        <Text dimColor wrap="truncate-end">
-          {text}
-        </Text>
-      </Box>
-    )
+    return drawToolRow($.ui.resolve(e), toolRowLine((input ?? {}) as ToolInput, await read($, todos)))
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     if (e.props.tool !== TOOL || e.props.isErrored) {
       return next(e)
     }
-    const { Box } = $.ui.resolve(e)
 
-    return <Box />
+    return drawEmptyResult($.ui.resolve(e))
   })
 }
