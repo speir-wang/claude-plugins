@@ -77,6 +77,13 @@ export async function readMyComments(p: Run, pr: string): Promise<{ findings: Fi
   return rebuild(jsonLines<GitHubComment>(await list('comments')), jsonLines<GitHubReview>(await list('reviews')), me)
 }
 
+/** Whether the branch already has a PR on GitHub; false when gh can't tell. */
+export async function hasPr(p: Run, branch: string): Promise<boolean> {
+  const ran = await p.run(['gh', 'pr', 'view', branch, '--json', 'number', '--jq', '.number'])
+
+  return ran.exitCode === 0 && ran.stdout.trim() !== ''
+}
+
 /** Approves the PR. Answers what went wrong, or nothing. */
 export async function approvePr(p: Run, pr: string): Promise<string | undefined> {
   const place = splitPr(pr)

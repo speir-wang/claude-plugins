@@ -957,3 +957,25 @@ test('Approve PR stays hidden while a re-checked comment is not addressed or add
   await $.turn.complete(turnEnd())
   expect(await paneText($)).toMatch('Approve PR')
 })
+
+test('Create PR is not offered when the branch already has a PR on GitHub', async ($, on) => {
+  const w = world(on)
+  w.answers['gh pr view feature'] = '12\n'
+  await startMine($)
+  await $.turn.complete(turnEnd())
+
+  expect(w.ran).toContain('gh pr view feature --json number --jq .number')
+  expect(await paneText($)).not.toMatch('Create PR')
+})
+
+test('after Create PR is confirmed it is not offered again', async ($, on) => {
+  world(on)
+  await startMine($)
+  await $.turn.complete(turnEnd())
+  const drawn = await pane($)
+
+  await drawn.press({ key: 'next' })
+  await drawn.press({ key: 'confirm' })
+
+  expect(await drawn.find({ key: 'next' })).toBeUndefined()
+})

@@ -54,6 +54,8 @@ export type Review = {
   /** `owner/repo#12`, or the branch name when there is no PR. */
   pr: string
   mode: Mode
+  /** Your branch already has a PR on GitHub, so Create PR is not offered. */
+  hasPr?: boolean
   rounds: Round[]
   findings: Finding[]
   /** Groups that did not run, with why, by round. */

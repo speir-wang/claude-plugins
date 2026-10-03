@@ -90,5 +90,5 @@ export function nextStep(review: Review): 'approve' | 'create' | null {
     return isGitHub && !isLeft('posted', 'dropped') ? 'approve' : null
   }
 
-  return !isGitHub && !isLeft('fixed', 'wontfix') ? 'create' : null
+  return !isGitHub && review.hasPr !== true && !isLeft('fixed', 'wontfix') ? 'create' : null
 }

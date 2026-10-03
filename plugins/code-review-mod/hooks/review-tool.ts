@@ -1,8 +1,8 @@
 import type { Finding, FindingStatus, Group, Incoming, Outcome, Review, ReviewInput } from '../types'
 
 import { TOOL_NAME } from './config'
-import { readMyComments } from './github'
-import { pickMode } from './mode'
+import { hasPr, readMyComments } from './github'
+import { pickMode, readPr } from './mode'
 import { applyOutcome, checkLine, toCheck } from './recheck'
 import type { Ports } from './ports'
 import { currentRound, newReview, nextRound, readFinding, setStatus, skipGroup } from './review'
@@ -109,7 +109,10 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   const mode = pickMode(pr, input.mode)
   // Your earlier comments on their PR make this a re-check, in any session.
   const rebuilt = mode === 'theirs' ? await readMyComments(p, pr) : null
-  const fresh = rebuilt === null ? newReview(pr, mode, head) : fromComments(pr, head, rebuilt)
+  // Your branch may already have a PR: then Create PR is not offered.
+  const isBranch = mode === 'mine' && readPr(pr) === undefined
+  const fresh: Review =
+    rebuilt === null ? { ...newReview(pr, mode, head), ...(isBranch ? { hasPr: await hasPr(p, pr) } : {}) } : fromComments(pr, head, rebuilt)
   const opening = rebuilt === null ? `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).` : recheckAnswer(fresh)
   if (current !== null && current.findings.length > 0) {
     // The panel asks before replacing; the review goes on either way.

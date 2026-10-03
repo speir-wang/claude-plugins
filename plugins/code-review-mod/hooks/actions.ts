@@ -198,6 +198,7 @@ export async function confirmStep(p: ViewPorts & Pick<Ports, 'review' | 'notice'
     return
   }
   if (view.step === 'create') {
+    await p.review.update(r => (r === null ? r : { ...r, hasPr: true }))
     await p.submit(`Create a GitHub PR for the branch ${review.pr}: push it, then run gh pr create with a short title and a description written from its commits.`)
     await backToList(p)
     return
