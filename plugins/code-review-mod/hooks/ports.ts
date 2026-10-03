@@ -1,0 +1,34 @@
+import type { ModelCompleteRequest, ModelCompleteResult } from 'claude-code'
+
+import type { Incoming, Review, View } from '../types'
+
+/** One value the plugin keeps in `$.state`, read and changed through two small calls. */
+export type Cell<T> = {
+  get: () => Promise<T>
+  /** Changes the value and answers the new one. */
+  update: (change: (value: T) => T) => Promise<T>
+}
+
+/**
+ * The engine's calls the other modules may use, as plain calls.
+ * The engine only follows `$` inside the entry file, so the entry file builds
+ * this and hands it on. Each module asks only for the members it uses.
+ */
+export type Ports = {
+  run: (argv: string[], stdin?: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+  openPane: (focus?: boolean) => Promise<void>
+  complete: (request: ModelCompleteRequest) => Promise<ModelCompleteResult>
+  /** Sends a prompt that Claude answers in a turn of its own. */
+  submit: (text: string) => Promise<void>
+  /** Puts text in the prompt box for the user to finish. */
+  fill: (text: string) => Promise<void>
+  /** The names of the tools Claude has now. */
+  toolNames: () => Promise<string[]>
+  /** Calls another plugin's tool; answers its result text, or nothing when it failed. */
+  callTool: (tool: string, input: Record<string, unknown>) => Promise<string | undefined>
+  review: Cell<Review | null>
+  incoming: Cell<Incoming | null>
+  view: Cell<View>
+  isChanged: Cell<boolean>
+  notice: Cell<string>
+}

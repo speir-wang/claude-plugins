@@ -1,0 +1,28 @@
+export const PANE = 'code-review-mod'
+export const PANE_TITLE = 'Review'
+
+/** The only skill the mod reacts to; the built-in /code-review has another shape. */
+export const SKILL = 'mattpocock-skills:code-review'
+
+export const TOOL_NAME = 'review'
+export const TOOL = `mcp__code-review-mod__${TOOL_NAME}`
+
+/** todo-commits' tool: "Fix it" adds a todo through it when it is there. */
+export const TODO_TOOL = 'mcp__todo-commits__todos'
+
+/** Saved reviews older than this are deleted when a session starts. */
+export const KEEP_MS = 7 * 24 * 60 * 60 * 1000
+
+export const SCORE_SCALE = '9-10 a bug or a broken spec; 6-8 fix before merging; 3-5 nice to have; 1-2 nitpick'
+
+export const RULE = [
+  `The user has a review panel. It only shows what you record with the ${TOOL} tool, so follow these rules for code reviews:`,
+  `- When a review starts, call ${TOOL} "start" with "pr" (owner/repo#number when the user gave a PR link, else the branch name), "mode" ("theirs" when the user gave a PR link, "mine" for their own branch) and "head" (the full commit hash reviewed).`,
+  `- After the reviewers report back, record every finding with ${TOOL} "add", one call per finding: group ("standards" or "spec"), weight ("must" when a written rule or the spec is broken, "maybe" for a judgement call), score, file, line, title (short), now (the code as it is now), suggested (better code, or "" when there is none) and why (why it matters, written for the user).`,
+  `- Score each finding 1-10 on how much it is worth fixing: ${SCORE_SCALE}.`,
+  '- On a PR that is not the user\'s ("theirs"), also give "comment": the comment to post for the author. Short, polite, asked as a question. No score and no Standards/Spec label. Leave out the code: the panel adds the suggested code below it.',
+  `- When a group did not run, call ${TOOL} "skipped" with the group and the reason (for example "no spec found").`,
+  '- In the chat, write only the skill\'s one-line summary: the count and the worst finding per group. Do not repeat the findings.',
+  `- When the user says "fix 3" or similar on their own PR, call ${TOOL} "set-status" with number 3 and status "fixing". After fixing a finding, call "set-status" with status "fixed". "won't fix 3" is status "wontfix".`,
+  `- To re-check: call ${TOOL} "start" again with the same pr and the new head. Its answer lists the findings to check and the commit to review from. Record each one with "outcome" (number, outcome "addressed", "wrong" or "missed", note). Then run the code review on every commit since that commit, and record new problems with "add" as usual.`,
+].join('\n')
