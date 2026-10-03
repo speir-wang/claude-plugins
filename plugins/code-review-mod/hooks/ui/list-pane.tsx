@@ -61,17 +61,18 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row">
-          <Text color="cyan">{review.pr}  </Text>
-          <Box key="mode-box">
-            <Button key="mode" label={`${review.mode === 'mine' ? 'your PR' : 'their PR'} ⇄`} plain hover={{ color: 'cyan' }} onPress={actions.flipMode} />
-          </Box>
-          <Text>  </Text>
-          <Text dimColor>
-            {open} open · {pending} pending · {done} done
-          </Text>
+      <Box flexDirection="row">
+        <Text color="cyan" wrap="truncate-end">
+          {review.pr}{'  '}
+        </Text>
+        <Box key="mode-box">
+          <Button key="mode" label={`${review.mode === 'mine' ? 'your PR' : 'their PR'} ⇄`} plain hover={{ color: 'cyan' }} onPress={actions.flipMode} />
         </Box>
+      </Box>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text dimColor>
+          {open} open · {pending} pending · {done} done
+        </Text>
         <Button key="recheck" label="Re-check" onPress={actions.recheck} />
       </Box>
       {isReviewing && <Text color="yellow">Reviewing… findings show here as Claude records them.</Text>}

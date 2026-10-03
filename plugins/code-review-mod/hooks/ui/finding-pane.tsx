@@ -4,7 +4,7 @@ import { KEYS } from '../config'
 import { draftBody } from '../draft'
 
 import type { Parts } from './parts'
-import { findingLabel } from './rows'
+import { scoreText, weightText } from './rows'
 
 /** What the buttons in the finding pane do. */
 export type FindingActions = {
@@ -43,17 +43,22 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
   const { Box, Text, Button, Code } = parts
   // Mobile has no text field: Edit and Rewrite show nothing there.
   const Input = 'Input' in parts ? parts.Input : undefined
-  const { finding, mode, view, notice, columns } = data
+  const { finding, mode, view, notice } = data
   const draft = finding.draft ?? { text: '', hasCode: finding.suggested.trim() !== '' }
   const hasCode = draft.hasCode && finding.suggested.trim() !== ''
 
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between">
-        <Text bold>#{finding.n}</Text>
+        <Text bold>
+          #{finding.n}  {scoreText(finding)}  {weightText(finding)}
+        </Text>
         <Button key="back" label="← Back" onPress={actions.back} />
       </Box>
-      <Text bold>{findingLabel(finding, Math.max(20, columns))}</Text>
+      <Text bold>{finding.title}</Text>
+      <Text color="cyan">
+        {finding.file}:{finding.line}
+      </Text>
 
       <Box flexDirection="column" marginTop={1}>
         <Text bold>Now</Text>

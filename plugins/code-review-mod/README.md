@@ -3,14 +3,15 @@
 A review panel for the `mattpocock-skills:code-review` skill. The findings land in the panel, not in one long chat message. Each one has a score, the code as it is now, the suggested code, and why it matters.
 
 ```
-feature  your PR ⇄  2 open · 1 pending · 1 done        [ Re-check ]
+feature  your PR ⇄
+2 open · 1 pending · 1 done                       [ Re-check ]
 
 Standards
-1:  9 must  src/api.ts:40  Retry loop never stops  fixing
-2:  4 maybe src/app.ts:12  Name the magic number
-3:  2 maybe src/app.ts:30  Trailing comma  won't fix
+#1  9/10 must fix api.ts:40   Retry loop never stops  fixing
+#2  4/10          app.ts:12   Name the magic number
+#3  2/10          app.ts:30   Trailing comma  won't fix
 Spec
-4:  8 must  src/cart.ts:7  Discount ignores the cap
+#4  8/10 must fix cart.ts:7   Discount ignores the cap
 
 Tip: "fix 3" or press a row · "re-check" after fixing · one review per session
 ```
@@ -27,7 +28,7 @@ Restart Claude Code after installing. It works on top of the `mattpocock-skills`
 ## Use it
 
 1. Run the code-review skill. The panel opens by itself. The chat gets only the skill's one-line summary.
-2. Findings sit in two groups, **Standards** and **Spec**, sorted by score. Scores 1–2 are greyed out.
+2. Findings sit in two groups, **Standards** and **Spec**, sorted by score out of 10. Scores 1–2 are greyed out. **must fix** marks a finding that breaks a written rule or the spec; the rest are judgement calls.
 3. Press a row (or its number, 1–9) to open it: the code now, the suggested code, then why it matters. ← Back or Esc returns.
 
 ### Your own branch
@@ -70,7 +71,6 @@ The panel suggests **Approve PR** on their PR, or **Create PR** on your branch i
 - **One review per session.** Starting a review of another PR asks before it replaces the one shown. `/clear` starts empty.
 - **Resume:** `claude --resume` brings the session's review back. It is saved under that session only and deleted after 7 days.
 - **Score scale:** 9–10 a bug or a broken spec · 6–8 fix before merging · 3–5 nice to have · 1–2 nitpick.
-- **Must fix** means a written rule or the spec is broken. **Maybe** is a judgement call.
 - **Rewrite** uses a small Sonnet call. If it gives no answer, the draft stays as it was and the panel says so.
 - The review tool's calls show as one line each in the conversation.
 

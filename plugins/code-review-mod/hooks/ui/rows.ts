@@ -30,13 +30,21 @@ export function fit(text: string, width: number): string {
   return text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width)
 }
 
-/** One finding row: score, must/maybe, file:line and the title, cut to `width`. */
-export function findingLabel(finding: Finding, width: number): string {
-  const score = finding.score === 0 ? ' —' : String(finding.score).padStart(2)
-  const weight = finding.group === 'comment' ? '     ' : finding.weight.padEnd(5)
-  const place = `${finding.file}:${finding.line}`
+/** The score as the row shows it: `9/10`, or a dash for a finding rebuilt from a comment. */
+export function scoreText(finding: Finding): string {
+  return finding.score === 0 ? '—' : `${finding.score}/10`
+}
 
-  return fit(`${score} ${weight} ${place}  ${finding.title}`, width).trimEnd()
+/** "must fix" for a broken written rule; nothing for a judgement call, where the score says enough. */
+export function weightText(finding: Finding): string {
+  return finding.group !== 'comment' && finding.weight === 'must' ? 'must fix' : ''
+}
+
+/** One finding row: score, "must fix" when a rule is broken, file name:line and the title, cut to `width`. */
+export function findingLabel(finding: Finding, width: number): string {
+  const name = finding.file.split('/').at(-1) ?? finding.file
+
+  return fit(`${scoreText(finding).padStart(5)} ${weightText(finding).padEnd(8)} ${name}:${finding.line}  ${finding.title}`, width).trimEnd()
 }
 
 /** The note after a row for a finding that is no longer open; null while it is open. */

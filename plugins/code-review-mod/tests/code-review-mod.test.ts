@@ -230,7 +230,9 @@ test('the panel shows Standards then Spec, sorted by score, with a skipped Spec 
   expect(text.indexOf('High one')).toBeLessThan(text.indexOf('Low one'))
   expect(text.indexOf('Low one')).toBeLessThan(text.indexOf('Spec'))
   expect(text).toMatch('skipped, no spec found')
-  expect(text).toMatch(/8 +must +src\/b\.ts:3/)
+  expect(text).toMatch(/8\/10 must fix b\.ts:3  High one/)
+  expect(text).toMatch(/2\/10 +app\.ts:12  Low one/)
+  expect(text).not.toMatch('maybe')
   const drawn = await pane($)
   const low = (await drawn.findAll({ type: 'Button' })).find(b => String(b.props.label).includes('Low one'))
   expect(low?.props.dimColor).toBe(true)
@@ -879,4 +881,16 @@ test('while the review runs, empty groups say reviewing and no next step is offe
   expect(done).not.toMatch('Reviewing…')
   expect(done).toMatch(/Spec\s+nothing found/)
   expect(done).toMatch('Create PR')
+})
+
+test('a row shows the file name only; the finding shows the full path', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, { ...FINDING, file: 'plugins/deep/hooks/review.ts', line: 75 })
+  const drawn = await pane($)
+
+  const label = String((await drawn.find({ key: 'f-1' }))?.props.label)
+  expect(label).toMatch(/^ *4\/10 +review\.ts:75  Name the magic number$/)
+  await drawn.press({ key: 'f-1' })
+  expect(await texts(drawn)).toContain('plugins/deep/hooks/review.ts:75')
 })
