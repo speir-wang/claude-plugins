@@ -65,6 +65,7 @@ function world(on: On, stored: Record<string, unknown> = {}): World {
     return { value: undefined } as never
   })
   on('session.start', ($, e) => e as never)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
   on('skill.prompt', ($, e) => ({ text: e.text }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__code-review-mod__${e.name}` } }) as never)
   on('tool.list', () => ({ value: w.tools.map(name => ({ name, description: '', mcp: name.startsWith('mcp__') })) }) as never)
@@ -101,6 +102,8 @@ function world(on: On, stored: Record<string, unknown> = {}): World {
   w.clock = mock.clock(on, { now: 1_000_000 })
   return w
 }
+
+const turnEnd = (agentId?: string) => ({ answer: 'Standards: 1 finding.', durationMs: 1, isAborted: false, turnId: 'turn', reason: 'end_turn', ...(agentId === undefined ? {} : { agentId }) }) as never
 
 let id = 0
 /** Calls the review tool the way Claude does; answers its result text and whether it failed. */
@@ -237,6 +240,7 @@ test('a group with no findings says nothing found', async ($, on) => {
   world(on)
   await startMine($)
   await review($, FINDING)
+  await $.turn.complete(turnEnd())
 
   expect(await paneText($)).toMatch(/Spec\s+nothing found/)
 })
@@ -714,6 +718,7 @@ test('when every finding on their PR is posted or dropped, Approve PR shows and 
   w.answers[POST] = '{"id": 1}'
   w.answers[APPROVE] = ''
   const drawn = await openTheirs($)
+  await $.turn.complete(turnEnd())
   expect(await drawn.find({ key: 'next' })).toBeUndefined()
   await drawn.press({ key: 'back' })
   expect(await drawn.find({ key: 'next' })).toBeUndefined()
@@ -737,6 +742,7 @@ test('when every finding on your branch is fixed or won\'t fix, Create PR shows 
   await startMine($)
   await review($, FINDING)
   await review($, { ...FINDING, title: 'Other' })
+  await $.turn.complete(turnEnd())
   await review($, { action: 'set-status', number: 1, status: 'fixed' })
   const drawn = await pane($)
   expect(await drawn.find({ key: 'next' })).toBeUndefined()
@@ -756,15 +762,14 @@ test('when every finding on your branch is fixed or won\'t fix, Create PR shows 
 test('a review with no findings suggests the next step at once', async ($, on) => {
   world(on)
   await startMine($)
+  await $.turn.complete(turnEnd())
 
   expect(await paneText($)).toMatch('Create PR')
 })
 
-const turnEnd = (agentId?: string) => ({ answer: 'Standards: 1 finding.', durationMs: 1, isAborted: false, turnId: 'turn', reason: 'end_turn', ...(agentId === undefined ? {} : { agentId }) }) as never
 
 test('when a turn that changed the review ends, the review tab comes to the front once', async ($, on) => {
   const w = world(on)
-  on('turn.complete', ($, e) => ({ text: e.answer }))
   await startMine($)
   await review($, FINDING)
 
@@ -852,4 +857,26 @@ test('the first nine rows open with their digit, in the order shown', async ($, 
 
   expect(String((await drawn.find({ key: 'f-2' }))?.props.hotkey)).toBe('1')
   expect(String((await drawn.find({ key: 'f-1' }))?.props.hotkey)).toBe('2')
+})
+
+test('while the review runs, empty groups say reviewing and no next step is offered', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.skill.prompt({ skill: SKILL, text: 'Review.' })
+  await review($, { action: 'start', pr: 'feature', head: HEAD })
+
+  const running = await paneText($)
+  expect(running).toMatch('Reviewing…')
+  expect(running).toMatch(/Spec\s+reviewing…/)
+  expect(running).not.toMatch('nothing found')
+  expect(running).not.toMatch('Create PR')
+
+  await $.turn.complete(turnEnd('sub-agent'))
+  expect(await paneText($)).toMatch('Reviewing…')
+
+  await $.turn.complete(turnEnd())
+  const done = await paneText($)
+  expect(done).not.toMatch('Reviewing…')
+  expect(done).toMatch(/Spec\s+nothing found/)
+  expect(done).toMatch('Create PR')
 })

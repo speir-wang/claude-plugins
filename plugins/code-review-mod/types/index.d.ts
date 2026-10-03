@@ -83,6 +83,8 @@ declare module 'claude-code' {
       view: View
       /** A review or re-check changed the list this turn: bring the tab to the front when it ends. */
       isChanged: boolean
+      /** A review or re-check is running: until the turn ends, empty groups are not "nothing found" yet. */
+      isReviewing: boolean
       /** The last thing that went wrong, shown in the panel; '' for none. */
       notice: string
     }

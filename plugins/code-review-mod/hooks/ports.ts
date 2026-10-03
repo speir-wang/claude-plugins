@@ -30,5 +30,6 @@ export type Ports = {
   incoming: Cell<Incoming | null>
   view: Cell<View>
   isChanged: Cell<boolean>
+  isReviewing: Cell<boolean>
   notice: Cell<string>
 }

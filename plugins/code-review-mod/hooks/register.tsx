@@ -39,6 +39,7 @@ const review = atom({ plugin: 'code-review-mod', key: 'review' } as const, null)
 const incoming = atom({ plugin: 'code-review-mod', key: 'incoming' } as const, null)
 const view = atom({ plugin: 'code-review-mod', key: 'view' } as const, { kind: 'list' })
 const isChanged = atom({ plugin: 'code-review-mod', key: 'isChanged' } as const, false)
+const isReviewing = atom({ plugin: 'code-review-mod', key: 'isReviewing' } as const, false)
 const notice = atom({ plugin: 'code-review-mod', key: 'notice' } as const, '')
 
 type $ = EngineInterface
@@ -79,6 +80,7 @@ function ports($: $): Ports {
     incoming: { get: () => read($, incoming), update: change => update($, incoming, change) },
     view: { get: () => read($, view), update: change => update($, view, change) },
     isChanged: { get: () => read($, isChanged), update: change => update($, isChanged, change) },
+    isReviewing: { get: () => read($, isReviewing), update: change => update($, isReviewing, change) },
     notice: { get: () => read($, notice), update: change => update($, notice, change) },
   }
 }
@@ -110,6 +112,7 @@ export const register: Register = on => {
   // The loader reads hook filters from this file only: keep this name written out, not SKILL from config.
   on('skill.prompt', { skill: 'mattpocock-skills:code-review' }, async ($, e, next) => {
     const prompted = await next(e)
+    await update($, isReviewing, () => true)
     await ports($).openPane()
 
     return { text: `${prompted.text}\n\n${RULE}` }
@@ -122,9 +125,12 @@ export const register: Register = on => {
     return answer.isError ? { result: answer.text, isError: true as const } : { result: answer.text }
   })
 
-  // A review or re-check that changed the list brings its tab to the front when the turn ends.
+  // When the main turn ends the review is done; if it changed the list, its tab comes to the front.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    if (e.agentId === undefined) {
+      await update($, isReviewing, () => false)
+    }
     if (e.agentId === undefined && (await read($, isChanged))) {
       await update($, isChanged, () => false)
       await ports($).openPane({ focus: true })
@@ -215,7 +221,13 @@ export const register: Register = on => {
 
     return drawListPane(
       parts,
-      { review: current, asking: waiting?.answer === 'ask' ? waiting.review.pr : null, notice: await read($, notice), columns },
+      {
+        review: current,
+        asking: waiting?.answer === 'ask' ? waiting.review.pr : null,
+        notice: await read($, notice),
+        isReviewing: await read($, isReviewing),
+        columns,
+      },
       {
         open: n => openFinding(ports($), n),
         flipMode: () => switchMode(ports($)),

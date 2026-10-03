@@ -15,6 +15,8 @@ export type ListData = {
   asking: string | null
   /** The last thing that went wrong or happened, shown once; '' for none. */
   notice: string
+  /** The review is still running: empty groups wait, and no next step is offered. */
+  isReviewing: boolean
   columns: number
 }
 
@@ -46,7 +48,7 @@ function blocks(review: Review): Block[] {
 
 /** Draws the review: rounds, then the Standards and Spec sections, each sorted by score. */
 export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actions: ListActions) {
-  const { review, asking, notice, columns } = data
+  const { review, asking, notice, isReviewing, columns } = data
   if (review === null) {
     return <Text dimColor>No review yet. Run the code-review skill.</Text>
   }
@@ -55,7 +57,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
   // The first nine rows, in the order shown, open with their digit.
   const order = shown.flatMap(block => block.sections.flatMap(section => section.rows.map(row => row.finding.n)))
   const rounds = roundSummaries(review)
-  const step = nextStep(review)
+  const step = isReviewing ? null : nextStep(review)
 
   return (
     <Box flexDirection="column">
@@ -72,6 +74,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
         </Box>
         <Button key="recheck" label="Re-check" onPress={actions.recheck} />
       </Box>
+      {isReviewing && <Text color="yellow">Reviewing… findings show here as Claude records them.</Text>}
       {rounds.length > 1 && (
         <Box flexDirection="row" columnGap={3}>
           {rounds.map(r => (
@@ -109,7 +112,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
             <Box key={`s-${block.round}-${section.group}`} flexDirection="column" marginBottom={1}>
               <Box flexDirection="row">
                 <Text bold>{section.label}</Text>
-                {section.note !== null && <Text dimColor>  {section.note}</Text>}
+                {section.note !== null && <Text dimColor>  {isReviewing && section.rows.length === 0 && section.note === 'nothing found' ? 'reviewing…' : section.note}</Text>}
               </Box>
               {section.rows.map(({ finding, isGrey }) => {
                 const tags = [statusTag(finding.status), outcomeTag(finding)].filter(tag => tag !== null)

@@ -47,7 +47,7 @@ export const TOOL_SPEC = {
 export type ToolAnswer = { text: string; isError?: true }
 
 /** What serving the tool needs. */
-export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'toolNames' | 'callTool' | 'run'>
+export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'isReviewing' | 'toolNames' | 'callTool' | 'run'>
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
@@ -81,6 +81,7 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
     return { text: `Review of ${pr} is open. The panel asks the user whether it replaces the one shown. Record findings as usual.` }
   }
   await p.incoming.update(() => null)
+  await p.isReviewing.update(() => true)
   const current = await p.review.get()
   if (current !== null && current.pr === pr) {
     if (current.rounds.at(-1)?.head === head) {
