@@ -1,8 +1,9 @@
-import type { FindingStatus, Group, Incoming, Outcome, Review, ReviewInput } from '../types'
+import type { Finding, FindingStatus, Group, Incoming, Outcome, Review, ReviewInput } from '../types'
 
 import { startFix } from './actions'
 
 import { TOOL_NAME } from './config'
+import { readMyComments } from './github'
 import { pickMode } from './mode'
 import { applyOutcome, checkLine, toCheck } from './recheck'
 import type { Ports } from './ports'
@@ -46,7 +47,7 @@ export const TOOL_SPEC = {
 export type ToolAnswer = { text: string; isError?: true }
 
 /** What serving the tool needs. */
-export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'toolNames' | 'callTool'>
+export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'isChanged' | 'toolNames' | 'callTool' | 'run'>
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
@@ -61,6 +62,11 @@ function recheckAnswer(review: Review): string {
       : `Check each of these and record it with "outcome": ${checks.join('; ')}.`
 
   return `Round ${round} of ${review.pr} started. ${todo} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add".`
+}
+
+/** A review of their PR rebuilt from your GitHub comments, its re-check round open at `head`. */
+function fromComments(pr: string, head: string, rebuilt: { findings: Finding[]; base: string }): Review {
+  return { pr, mode: 'theirs', rounds: [{ n: 1, head: rebuilt.base }, { n: 2, head }], findings: rebuilt.findings, skipped: [] }
 }
 
 /** Opens a review, or the next round of the same one. */
@@ -80,19 +86,32 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
     if (current.rounds.at(-1)?.head === head) {
       return { text: `Round ${currentRound(current)} of ${pr} is open. Record findings with "add".` }
     }
+    // On their PR, GitHub holds what was posted: every re-check starts from it.
+    const rebuilt = current.mode === 'theirs' ? await readMyComments(p, pr) : null
+    if (rebuilt !== null) {
+      const fresh = fromComments(pr, head, rebuilt)
+      await p.review.update(() => fresh)
+      await p.isChanged.update(() => true)
+      return { text: recheckAnswer(fresh) }
+    }
     const next = await p.review.update(review => (review === null ? review : nextRound(review, head)))
     await p.isChanged.update(() => true)
     return next === null ? fail('No review is open.') : { text: recheckAnswer(next) }
   }
   const mode = pickMode(pr, input.mode)
+  // Your earlier comments on their PR make this a re-check, in any session.
+  const rebuilt = mode === 'theirs' ? await readMyComments(p, pr) : null
+  const fresh = rebuilt === null ? newReview(pr, mode, head) : fromComments(pr, head, rebuilt)
+  const opening = rebuilt === null ? `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).` : recheckAnswer(fresh)
   if (current !== null && current.findings.length > 0) {
     // The panel asks before replacing; the review goes on either way.
-    await p.incoming.update(() => ({ review: newReview(pr, mode, head), answer: 'ask' }))
-    return { text: `Review of ${pr} started. The panel asks the user whether it replaces the one shown. Record findings as usual.` }
+    await p.incoming.update(() => ({ review: fresh, answer: 'ask' }))
+    return { text: `${opening} The panel asks the user whether it replaces the one shown; go on as usual.` }
   }
-  await p.review.update(() => newReview(pr, mode, head))
+  await p.review.update(() => fresh)
+  await p.isChanged.update(() => true)
 
-  return { text: `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).` }
+  return { text: opening }
 }
 
 const OUTCOMES: Outcome[] = ['addressed', 'wrong', 'missed']

@@ -32,3 +32,14 @@ export const RULE = [
   `- When the user says "fix 3" or similar on their own PR, call ${TOOL} "set-status" with number 3 and status "fixing". After fixing a finding, call "set-status" with status "fixed". "won't fix 3" is status "wontfix".`,
   `- To re-check: call ${TOOL} "start" again with the same pr and the new head. Its answer lists the findings to check and the commit to review from. Record each one with "outcome" (number, outcome "addressed", "wrong" or "missed", note). Then run the code review on every commit since that commit, and record new problems with "add" as usual.`,
 ].join('\n')
+
+/** The note added to a message that links a GitHub PR, so a plain "are my comments addressed?" works in any session. */
+export function recheckNote(prs: string[]): string {
+  return [
+    `The user's message links ${prs.join(', ')}. If they ask whether their review comments there were addressed, re-check it with the review panel:`,
+    `call ${TOOL} "start" with that pr, mode "theirs" and the PR's head commit (gh pr view <number> -R <owner/repo> --json headRefOid).`,
+    'It rebuilds the review from their own GitHub comments and answers with what to check.',
+    '',
+    RULE,
+  ].join('\n')
+}

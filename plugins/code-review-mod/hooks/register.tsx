@@ -22,7 +22,8 @@ import {
   togglePending,
   wontFix,
 } from './actions'
-import { PANE, PANE_TITLE, RULE, TOOL } from './config'
+import { PANE, PANE_TITLE, RULE, TOOL, recheckNote } from './config'
+import { prLinks } from './mode'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
 import { drawFindingPane } from './ui/finding-pane'
@@ -87,6 +88,16 @@ export const register: Register = on => {
     const answer = await runTool(ports($), e as ReviewInput)
 
     return answer.isError ? { result: answer.text, isError: true as const } : { result: answer.text }
+  })
+
+  // A message with a PR link may ask for a re-check: tell Claude how, rule included.
+  on('prompt.submit', async ($, e, next) => {
+    const prs = prLinks(e.text)
+    if (prs.length === 0) {
+      return next(e)
+    }
+
+    return next({ ...e, context: [...(e.context ?? []), recheckNote(prs)] })
   })
 
   on('prompt.compose', async ($, e, next) => {

@@ -16,6 +16,8 @@ type World = {
   /** stdin given to each command, by its line. */
   stdin: Record<string, string>
   submitted: string[]
+  /** The context each submitted prompt carried. */
+  contexts: (readonly string[] | undefined)[]
   filled: string[]
   /** Calls made to other tools, like todo-commits'. */
   called: { tool: string; input: Record<string, unknown> }[]
@@ -36,6 +38,7 @@ function world(on: On, stored: Record<string, unknown> = {}): World {
     answers: {},
     stdin: {},
     submitted: [],
+    contexts: [],
     filled: [],
     called: [],
     tools: [TOOL, 'mcp__todo-commits__todos', 'Bash'],
@@ -78,6 +81,7 @@ function world(on: On, stored: Record<string, unknown> = {}): World {
   on('store.keys', () => ({ value: Object.keys(w.store) }) as never)
   on('prompt.submit', ($, e) => {
     w.submitted.push(e.text)
+    w.contexts.push(e.context)
     return { text: e.text } as never
   })
   on('prompt.fill', ($, e) => {
@@ -460,7 +464,7 @@ test('Add to review puts a draft in the pending pile without posting it; Remove 
   await drawn.press({ key: 'pending' })
   expect(await texts(drawn)).toContain('in review')
   expect(String((await drawn.find({ key: 'submit' }))?.props.label)).toBe('1 pending · Submit review')
-  expect(w.ran).toEqual([])
+  expect(w.ran).not.toContain(POST)
 
   await drawn.press({ key: 'f-1' })
   expect(String((await drawn.find({ key: 'pending' }))?.props.label)).toBe('Remove from review')
@@ -476,12 +480,12 @@ test('Submit asks first, with Comment picked, then posts one review with each co
   await drawn.press({ key: 'pending' })
 
   await drawn.press({ key: 'submit' })
-  expect(w.ran).toEqual([])
+  expect(w.ran).not.toContain(POST)
   expect(String((await drawn.find({ key: 'event-COMMENT' }))?.props.label)).toMatch('●')
   expect(String((await drawn.find({ key: 'event-APPROVE' }))?.props.label)).toMatch('○')
   await drawn.press({ key: 'post' })
 
-  expect(w.ran).toEqual([POST])
+  expect(w.ran.filter(l => l === POST)).toEqual([POST])
   const sent = JSON.parse(w.stdin[POST]!)
   expect(sent.event).toBe('COMMENT')
   expect(sent.commit_id).toBe(HEAD)
@@ -500,7 +504,7 @@ test('Request changes is posted only when picked; Cancel posts nothing', async (
 
   await drawn.press({ key: 'submit' })
   await drawn.press({ key: 'cancel' })
-  expect(w.ran).toEqual([])
+  expect(w.ran).not.toContain(POST)
   expect(await texts(drawn)).toContain('in review')
 
   await drawn.press({ key: 'submit' })
@@ -608,4 +612,97 @@ test('the same head again does not open another round', async ($, on) => {
 
   expect(again.text).toMatch('Round 1')
   expect(await paneText($)).not.toMatch('Round 2')
+})
+
+const OLD = 'c'.repeat(40)
+
+/** Fakes gh: you are "me", with two thread starters and a reply on acme/shop#7, last reviewed at OLD. */
+function fakeGitHub(w: World) {
+  const line = (o: unknown) => JSON.stringify(o)
+  w.answers['gh api user'] = 'me\n'
+  w.answers['gh api repos/acme/shop/pulls/7/comments'] = [
+    line({ id: 1, user: { login: 'me' }, path: 'src/app.ts', line: 12, body: 'Could 3000 get a name?' }),
+    line({ id: 2, user: { login: 'author' }, in_reply_to_id: 1, path: 'src/app.ts', line: 12, body: 'Done!' }),
+    line({ id: 3, user: { login: 'me' }, path: 'src/b.ts', line: 4, body: 'Is this check needed?' }),
+  ].join('\n')
+  w.answers['gh api repos/acme/shop/pulls/7/reviews'] = line({ user: { login: 'me' }, commit_id: OLD, submitted_at: '2026-10-01T10:00:00Z', state: 'COMMENTED' })
+}
+
+test('a message with a PR link tells Claude a re-check is possible, rule included', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  await $.prompt.submit({ text: 'are my comments on https://github.com/acme/shop/pull/7 addressed?' } as never)
+  await $.prompt.submit({ text: 'no link here' } as never)
+
+  expect(w.contexts[0]?.join('\n')).toMatch('acme/shop#7')
+  expect(w.contexts[0]?.join('\n')).toMatch(TOOL)
+  expect(w.contexts[1]).toBeUndefined()
+})
+
+test('in a new session, starting their PR rebuilds the list from your GitHub comments and re-checks from your last review', async ($, on) => {
+  const w = world(on)
+  fakeGitHub(w)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', mode: 'theirs', head: HEAD })
+
+  expect(started.text).toMatch('Round 2')
+  expect(started.text).toMatch('#1 src/app.ts:12 Could 3000 get a name?')
+  expect(started.text).toMatch('#2 src/b.ts:4 Is this check needed?')
+  expect(started.text).toMatch(`${OLD}..HEAD`)
+  expect(w.ran.some(l => l.includes('--paginate'))).toBe(true)
+
+  await review($, { action: 'outcome', number: 1, outcome: 'addressed' })
+  await review($, { action: 'outcome', number: 2, outcome: 'missed', note: 'Still there' })
+  const shown = await paneText($)
+  expect(shown).toMatch('Your comments')
+  expect(shown).toMatch('✅ addressed')
+  expect(shown).toMatch('❌ not addressed')
+  expect(shown).toMatch('Round 2 · ✅ 1  ⚠️ 0  ❌ 1 · 0 new')
+})
+
+test('new problems on their PR get drafts and go through the same pending and submit flow', async ($, on) => {
+  const w = world(on)
+  fakeGitHub(w)
+  w.answers[POST] = '{"id": 2}'
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await review($, { action: 'start', pr: 'acme/shop#7', mode: 'theirs', head: HEAD })
+  await review($, { ...THEIRS, title: 'A regression' })
+
+  const drawn = await pane($)
+  await drawn.press({ key: 'f-3' })
+  await drawn.press({ key: 'pending' })
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'post' })
+
+  const sent = JSON.parse(w.stdin[POST]!)
+  expect(sent.comments).toHaveLength(1)
+  expect(sent.commit_id).toBe(HEAD)
+})
+
+test('with no comments of yours on GitHub, their PR starts as a first review', async ($, on) => {
+  const w = world(on)
+  w.answers['gh api user'] = 'me\n'
+  w.answers['gh api repos/acme/shop/pulls/7/comments'] = ''
+  w.answers['gh api repos/acme/shop/pulls/7/reviews'] = ''
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+
+  expect(started.text).toMatch('Review of acme/shop#7 started')
+})
+
+test('on their PR a re-check in the same session also rebuilds from GitHub', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  w.answers['gh api user'] = 'me\n'
+  await review($, { action: 'start', pr: 'acme/shop#7', head: OLD })
+  await review($, THEIRS)
+
+  fakeGitHub(w)
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+
+  expect(started.text).toMatch('#1 src/app.ts:12 Could 3000 get a name?')
+  expect(await paneText($)).toMatch('Your comments')
 })

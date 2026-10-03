@@ -1,5 +1,7 @@
 import type { Finding, ReviewEvent } from '../types'
 
+import { rebuild } from './comments'
+import type { GitHubComment, GitHubReview } from './comments'
 import { draftBody } from './draft'
 import type { Ports } from './ports'
 
@@ -40,4 +42,37 @@ export async function postReview(p: Run, pr: string, head: string, event: Review
   const ran = await p.run(['gh', 'api', `repos/${place.repo}/pulls/${place.number}/reviews`, '--method', 'POST', '--input', '-'], JSON.stringify(payload))
 
   return ran.exitCode === 0 ? undefined : why(ran)
+}
+
+/** Reads a JSON-lines answer (`--jq '.[] | @json'`) into its items; bad lines are skipped. */
+function jsonLines<T>(text: string): T[] {
+  return text
+    .split('\n')
+    .filter(line => line.trim() !== '')
+    .flatMap(line => {
+      try {
+        return [JSON.parse(line) as T]
+      } catch {
+        return []
+      }
+    })
+}
+
+/**
+ * Rebuilds a review of their PR from your own comments on GitHub, for a
+ * re-check in any session. Nothing when gh can't tell who you are or you have
+ * no comments there.
+ */
+export async function readMyComments(p: Run, pr: string): Promise<{ findings: Finding[]; base: string } | null> {
+  const place = splitPr(pr)
+  const me = (await p.run(['gh', 'api', 'user', '--jq', '.login'])).stdout.trim()
+  if (place === undefined || me === '') {
+    return null
+  }
+  const list = async (what: 'comments' | 'reviews') => {
+    const ran = await p.run(['gh', 'api', `repos/${place.repo}/pulls/${place.number}/${what}`, '--paginate', '--jq', '.[] | @json'])
+    return ran.exitCode === 0 ? ran.stdout : ''
+  }
+
+  return rebuild(jsonLines<GitHubComment>(await list('comments')), jsonLines<GitHubReview>(await list('reviews')), me)
 }
