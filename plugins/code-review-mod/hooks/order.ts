@@ -7,6 +7,8 @@ export type Section = {
   label: string
   /** Said under the label when the section has no rows; null when it has rows. */
   note: string | null
+  /** True when the group did not run, so its note is the reason rather than "nothing found". */
+  isSkipped: boolean
   rows: Row[]
 }
 
@@ -28,7 +30,7 @@ export function groupFindings(findings: Finding[], skipped: { group: Group; reas
     const skip = skipped.find(s => s.group === group)
     const note = rows.length > 0 ? null : skip === undefined ? 'nothing found' : `skipped, ${skip.reason}`
 
-    return { group, label: GROUP_LABELS[group], note, rows }
+    return { group, label: GROUP_LABELS[group], note, isSkipped: skip !== undefined, rows }
   }
   const comments = section('comment')
 

@@ -119,7 +119,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
             <Box key={`s-${block.round}-${section.group}`} flexDirection="column" marginBottom={1}>
               <Box flexDirection="row">
                 <Text bold>{section.label}</Text>
-                {section.note !== null && <Text dimColor>  {isReviewing && section.rows.length === 0 && section.note === 'nothing found' ? 'reviewing…' : section.note}</Text>}
+                {section.note !== null && <Text dimColor>  {isReviewing && section.rows.length === 0 && !section.isSkipped ? 'reviewing…' : section.note}</Text>}
               </Box>
               {section.rows.map(({ finding, isGrey }) => {
                 const tags = [statusTag(finding.status), outcomeTag(finding)].filter(tag => tag !== null)

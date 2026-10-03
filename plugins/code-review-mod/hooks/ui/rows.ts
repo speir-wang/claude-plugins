@@ -4,6 +4,15 @@ import { OUTCOME_LABELS } from '../recheck'
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
+/** The icon and color of each re-check answer, shared by the tool row and the panel row. */
+const OUTCOME_LOOKS = {
+  addressed: { icon: '✅', color: 'green' },
+  wrong: { icon: '⚠️', color: 'yellow' },
+  missed: { icon: '❌', color: 'red' },
+} as const
+
+type Tag = { text: string; color: 'yellow' | 'green' | undefined }
+
 /** The icon, color and text of the one-line tool row. */
 export function toolRowLine(input: ReviewInput): { icon: string; color: 'yellow' | 'green' | 'red' | undefined; text: string } {
   const { action, number } = input
@@ -17,7 +26,7 @@ export function toolRowLine(input: ReviewInput): { icon: string; color: 'yellow'
     return { icon: '⊘', color: undefined, text: `${text(input.group)} skipped: ${text(input.reason)}` }
   }
   if (action === 'outcome') {
-    const look = input.outcome === 'addressed' ? { icon: '✅', color: 'green' as const } : input.outcome === 'wrong' ? { icon: '⚠️', color: 'yellow' as const } : { icon: '❌', color: 'red' as const }
+    const look = input.outcome === 'addressed' || input.outcome === 'wrong' ? OUTCOME_LOOKS[input.outcome] : OUTCOME_LOOKS.missed
     return { ...look, text: `#${String(number)} ${text(input.note)}` }
   }
 
@@ -50,8 +59,8 @@ export function findingLabel(finding: Finding, width: number): string {
 }
 
 /** The note after a row for a finding that is no longer open; null while it is open. */
-export function statusTag(status: FindingStatus): { text: string; color: 'yellow' | 'green' | undefined } | null {
-  const tags: Record<FindingStatus, { text: string; color: 'yellow' | 'green' | undefined } | null> = {
+export function statusTag(status: FindingStatus): Tag | null {
+  const tags: Record<FindingStatus, Tag | null> = {
     open: null,
     queued: { text: 'in fix list', color: 'yellow' },
     fixing: { text: 'fixing', color: 'yellow' },
@@ -70,12 +79,7 @@ export function outcomeTag(finding: Finding): { text: string; color: 'yellow' | 
   if (finding.outcome === undefined) {
     return null
   }
-  const looks = {
-    addressed: { icon: '✅', color: 'green' },
-    wrong: { icon: '⚠️', color: 'yellow' },
-    missed: { icon: '❌', color: 'red' },
-  } as const
-  const { icon, color } = looks[finding.outcome]
+  const { icon, color } = OUTCOME_LOOKS[finding.outcome]
 
   return { text: `${icon} ${OUTCOME_LABELS[finding.outcome]}`, color }
 }
