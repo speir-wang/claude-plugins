@@ -127,17 +127,15 @@ async function pane($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
   return $.ui.mount({ plugin: 'code-review-mod', surface, component: 'Pane', requestId: 'code-review-mod', props: PANE_PROPS })
 }
 
-/** The Text elements drawn in the pane, read once. */
-async function paneTexts($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
-  const drawn = await pane($, surface)
-  const texts = await drawn.findAll({ type: 'Text' })
-  await drawn.unmount()
-  return texts
-}
-
-/** All the text drawn in the pane, one string. */
+/** All the text drawn in the pane, Button labels included, one line per element in drawing order. */
 async function paneText($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
-  return (await paneTexts($, surface)).map(t => t.text).join('\n')
+  const drawn = await pane($, surface)
+  const all = await drawn.findAll({})
+  await drawn.unmount()
+  return all
+    .filter(el => el.type === 'Text' || el.type === 'Button')
+    .map(el => (el.type === 'Button' ? String(el.props.label) : el.text))
+    .join('\n')
 }
 
 test('the code-review skill opens the panel and carries the rule', async ($, on) => {
@@ -226,7 +224,8 @@ test('the panel shows Standards then Spec, sorted by score, with a skipped Spec 
   expect(text.indexOf('Low one')).toBeLessThan(text.indexOf('Spec'))
   expect(text).toMatch('skipped, no spec found')
   expect(text).toMatch(/8 +must +src\/b\.ts:3/)
-  const low = (await paneTexts($)).find(t => t.text.includes('Low one'))
+  const drawn = await pane($)
+  const low = (await drawn.findAll({ type: 'Button' })).find(b => String(b.props.label).includes('Low one'))
   expect(low?.props.dimColor).toBe(true)
 })
 
@@ -236,4 +235,39 @@ test('a group with no findings says nothing found', async ($, on) => {
   await review($, FINDING)
 
   expect(await paneText($)).toMatch(/Spec\s+nothing found/)
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`opening a finding shows the code now, the suggested code, then why it matters (${surface})`, async ($, on) => {
+    const w = world(on)
+    await startMine($)
+    await review($, FINDING)
+
+    const drawn = await pane($, surface)
+    await drawn.press({ key: 'f-1' })
+    const codes = await drawn.findAll({ type: 'Code' })
+    expect(codes.map(c => c.props.source)).toEqual(['const wait = 3000', '@@ -12,1 +12,1 @@\n-const wait = 3000\n+const RETRY_MS = 3000'])
+    expect(codes[0]!.props.path).toBe('src/app.ts')
+    expect(codes[1]!.props.format).toBe('diff')
+    const texts = (await drawn.findAll({ type: 'Text' })).map(t => t.text)
+    expect(texts).toContain('Why it matters')
+    expect(texts).toContain('A name says what 3000 is for.')
+    expect(w.opened.at(-1)).toEqual({ id: 'code-review-mod', focus: undefined })
+
+    // The test kit cannot send a close made by the person (Esc); Back runs the same step.
+    await drawn.press({ key: 'back' })
+    expect(await drawn.find({ key: 'f-1' })).toBeDefined()
+    await drawn.unmount()
+  })
+}
+
+test('a finding with no suggested code says so', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, { ...FINDING, suggested: '' })
+  const drawn = await pane($)
+  await drawn.press({ key: 'f-1' })
+
+  expect((await drawn.findAll({ type: 'Code' })).length).toBe(1)
+  expect((await drawn.findAll({ type: 'Text' })).map(t => t.text)).toContain('No code change suggested.')
 })

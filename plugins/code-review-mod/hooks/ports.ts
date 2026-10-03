@@ -16,7 +16,7 @@ export type Cell<T> = {
  */
 export type Ports = {
   run: (argv: string[], stdin?: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>
-  openPane: (focus?: boolean) => Promise<void>
+  openPane: (options?: { focus?: true; closeOnEscape?: true }) => Promise<void>
   complete: (request: ModelCompleteRequest) => Promise<ModelCompleteResult>
   /** Sends a prompt that Claude answers in a turn of its own. */
   submit: (text: string) => Promise<void>

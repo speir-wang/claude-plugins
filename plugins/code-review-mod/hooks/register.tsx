@@ -3,9 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ReviewInput } from '../types'
 
+import { backToList, openFinding } from './actions'
 import { PANE, PANE_TITLE, RULE, TOOL } from './config'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
+import { drawFindingPane } from './ui/finding-pane'
 import { drawListPane } from './ui/list-pane'
 import { toolRowLine } from './ui/rows'
 import { drawEmptyResult, drawToolRow } from './ui/tool-row'
@@ -22,8 +24,8 @@ type $ = EngineInterface
 function ports($: $): Ports {
   return {
     run: async (argv, stdin) => $.process.run(argv, stdin === undefined ? undefined : { stdin }),
-    openPane: async focus => {
-      await $.ui.open({ id: PANE, title: PANE_TITLE, ...(focus === true ? { focus: true as const } : {}) })
+    openPane: async options => {
+      await $.ui.open({ id: PANE, title: PANE_TITLE, ...options })
     },
     complete: request => $.model.complete(request),
     submit: async text => {
@@ -77,9 +79,32 @@ export const register: Register = on => {
     return { sections: [...composed.sections, { id: 'code-review-mod:rule', text: RULE, scope: 'session' }] }
   })
 
+  on('ui.close', async ($, e, next) => {
+    if (e.id !== PANE) {
+      return next(e)
+    }
+    // Esc or the close mark on a finding goes back to the list instead of closing.
+    if (e.origin.kind === 'person' && (await read($, view)).kind !== 'list') {
+      await backToList(ports($))
+      return { value: undefined }
+    }
+    await update($, view, () => ({ kind: 'list' }))
+
+    return next(e)
+  })
+
   // Written out for the loader: this is PANE.
   on('ui.render', { component: 'Pane', requestId: 'code-review-mod' }, async ($, e) => {
-    return drawListPane($.ui.resolve(e), { review: await read($, review), columns: e.props.bodyColumns ?? 60 })
+    const parts = $.ui.resolve(e)
+    const columns = e.props.bodyColumns ?? 60
+    const shown = await read($, view)
+    const current = await read($, review)
+    const finding = shown.kind === 'finding' ? current?.findings.find(f => f.n === shown.n) : undefined
+    if (finding !== undefined) {
+      return drawFindingPane(parts, finding, columns, { back: () => backToList(ports($)) })
+    }
+
+    return drawListPane(parts, { review: current, columns }, { open: n => openFinding(ports($), n) })
   })
 
   // The review tool's calls draw as one line; the panel shows the review itself.
