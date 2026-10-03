@@ -148,7 +148,7 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
 
 **Re-check on your PR.** It happens in the session where you're working. It uses the findings kept there and the head commit from the last round.
 
-**Lifetime.** Review state lives in the session's state only. Nothing goes to the cross-session store. One review per session. Starting a review of a different PR asks before replacing.
+**Lifetime.** Review state lives in the session's state. A copy is kept in the store under the session's id, only so `claude --resume` brings it back (see the facts below). No other session reads it. One review per session. Starting a review of a different PR asks before replacing.
 
 **Fix it.** If todo-commits is installed, Fix it adds a todo naming the finding, through todo-commits' tool. Otherwise it sends Claude a prompt to fix that one finding.
 
@@ -166,11 +166,11 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
 - Keys in the panel: ↑/↓ move, Enter opens, Esc goes back, and one letter per button (f fix, w won't fix, a ask, p add to review, d drop, e edit, r rewrite).
 - Each mod bringing its own tab to the front when it changes.
 
-**Facts to test before building on them:**
-- Does the skill-start hook fire when you type the slash command yourself, or only when Claude calls the skill?
-- Does opening a panel that's already open bring its tab to the front?
-- Does session state come back on `claude --resume`?
-- How can the mod tell todo-commits is installed?
+**Facts tested before building on them** (from the Claude Code 2.1.288 API):
+- **Skill hook on a typed slash command:** yes. `skill.prompt` fires when you type `/name`, when Claude calls the Skill tool, and when a skill is preloaded. The mod hooks it and adds the rule to the skill's own text.
+- **Panel to the front:** opening a panel that's already open only changes its title. Opening it with `focus` asks the screen to raise it. That only works while the prompt box is empty. So the mod opens with `focus` when a review or re-check finishes.
+- **Session state on `claude --resume`:** not promised. `$.state` lives for the running process. So the mod also writes the review to the store under the session's id, and reads it back only when that same session starts again. Saved reviews older than 7 days are deleted. No other session reads them.
+- **Is todo-commits installed:** `$.tool.list()` holds `mcp__todo-commits__todos`. Fix it then calls that tool with action `add`.
 
 ## Testing Decisions
 
