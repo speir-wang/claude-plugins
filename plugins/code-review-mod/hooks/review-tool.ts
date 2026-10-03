@@ -1,9 +1,11 @@
-import type { Group, ReviewInput } from '../types'
+import type { FindingStatus, Group, ReviewInput } from '../types'
+
+import { startFix } from './actions'
 
 import { TOOL_NAME } from './config'
 import { pickMode } from './mode'
 import type { Ports } from './ports'
-import { currentRound, newReview, nextRound, readFinding, skipGroup } from './review'
+import { currentRound, newReview, nextRound, readFinding, setStatus, skipGroup } from './review'
 
 /** The review tool, as it is registered. */
 export const TOOL_SPEC = {
@@ -43,7 +45,7 @@ export const TOOL_SPEC = {
 export type ToolAnswer = { text: string; isError?: true }
 
 /** What serving the tool needs. */
-export type ToolPorts = Pick<Ports, 'review' | 'isChanged'>
+export type ToolPorts = Pick<Ports, 'review' | 'isChanged' | 'toolNames' | 'callTool'>
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
@@ -68,13 +70,36 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   return { text: `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).` }
 }
 
+const STATUSES: FindingStatus[] = ['open', 'fixing', 'fixed', 'wontfix']
+
+/** "set-status": "fixing" works like the Fix it button. */
+async function changeStatus(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
+  const { number, status } = input
+  const finding = (await p.review.get())?.findings.find(f => f.n === number)
+  if (finding === undefined || typeof number !== 'number') {
+    return fail(`No finding number ${String(number)}.`)
+  }
+  if (!STATUSES.includes(status as FindingStatus)) {
+    return fail('"status" must be "open", "fixing", "fixed" or "wontfix".')
+  }
+  if (status === 'fixing') {
+    const started = await startFix(p, number)
+    return started !== null && 'todo' in started
+      ? { text: `#${number} is being fixed: added the todo "${started.todo}".` }
+      : { text: `#${number} is being fixed. Fix it now, then set its status to "fixed".` }
+  }
+  await p.review.update(r => (r === null ? r : setStatus(r, number, status as FindingStatus)))
+
+  return { text: `#${number} is ${status === 'wontfix' ? "won't fix" : status}.` }
+}
+
 /** Serves the review tool. Every answer is one line. */
 export async function runTool(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   if (input.action === 'start') {
     return start(p, input)
   }
   const review = await p.review.get()
-  if (input.action !== 'add' && input.action !== 'skipped') {
+  if (input.action !== 'add' && input.action !== 'skipped' && input.action !== 'set-status') {
     return fail('Unknown action. Use "start", "add", "skipped", "outcome" or "set-status".')
   }
   if (review === null) {
@@ -88,6 +113,9 @@ export async function runTool(p: ToolPorts, input: ReviewInput): Promise<ToolAns
     await p.review.update(r => (r === null ? r : { ...r, findings: [...r.findings, finding] }))
     await p.isChanged.update(() => true)
     return { text: `Added #${finding.n}: ${finding.title}` }
+  }
+  if (input.action === 'set-status') {
+    return changeStatus(p, input)
   }
   const group = input.group
   if (group !== 'standards' && group !== 'spec') {

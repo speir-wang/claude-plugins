@@ -1,4 +1,4 @@
-import type { Finding, ReviewInput } from '../../types'
+import type { Finding, FindingStatus, ReviewInput } from '../../types'
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
@@ -37,4 +37,19 @@ export function findingLabel(finding: Finding, width: number): string {
   const place = `${finding.file}:${finding.line}`
 
   return fit(`${score} ${weight} ${place}  ${finding.title}`, width).trimEnd()
+}
+
+/** The note after a row for a finding that is no longer open; null while it is open. */
+export function statusTag(status: FindingStatus): { text: string; color: 'yellow' | 'green' | undefined } | null {
+  const tags: Record<FindingStatus, { text: string; color: 'yellow' | 'green' | undefined } | null> = {
+    open: null,
+    fixing: { text: 'fixing', color: 'yellow' },
+    fixed: { text: '✔ fixed', color: 'green' },
+    wontfix: { text: "won't fix", color: undefined },
+    pending: { text: 'in review', color: 'yellow' },
+    posted: { text: '✔ posted', color: 'green' },
+    dropped: { text: 'dropped', color: undefined },
+  }
+
+  return tags[status]
 }

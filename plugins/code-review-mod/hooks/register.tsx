@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ReviewInput } from '../types'
 
-import { backToList, openFinding, switchMode } from './actions'
+import { askAbout, backToList, fixIt, openFinding, switchMode, wontFix } from './actions'
 import { PANE, PANE_TITLE, RULE, TOOL } from './config'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
@@ -100,8 +100,14 @@ export const register: Register = on => {
     const shown = await read($, view)
     const current = await read($, review)
     const finding = shown.kind === 'finding' ? current?.findings.find(f => f.n === shown.n) : undefined
-    if (finding !== undefined) {
-      return drawFindingPane(parts, finding, columns, { back: () => backToList(ports($)) })
+    if (current !== null && finding !== undefined) {
+      const n = finding.n
+      return drawFindingPane(parts, finding, current.mode, columns, {
+        back: () => backToList(ports($)),
+        fix: () => fixIt(ports($), n),
+        wontFix: () => wontFix(ports($), n),
+        ask: () => askAbout(ports($), n),
+      })
     }
 
     return drawListPane(parts, { review: current, columns }, { open: n => openFinding(ports($), n), flipMode: () => switchMode(ports($)) })

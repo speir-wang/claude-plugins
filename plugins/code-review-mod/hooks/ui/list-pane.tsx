@@ -4,7 +4,7 @@ import { TIPS } from '../config'
 import { groupFindings } from '../order'
 import { counts } from '../review'
 import type { Parts } from './parts'
-import { findingLabel } from './rows'
+import { findingLabel, statusTag } from './rows'
 
 /** What the list pane shows. */
 export type ListData = {
@@ -47,19 +47,31 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
             <Text bold>{section.label}</Text>
             {section.note !== null && <Text dimColor>  {section.note}</Text>}
           </Box>
-          {section.rows.map(({ finding, isGrey }) => (
-            <Box key={`row-${finding.n}`}>
+          {section.rows.map(({ finding, isGrey }) => {
+            const tag = statusTag(finding.status)
+            // The tag sits after the title, so the title gives up its width.
+            const width = columns - 3 - (tag === null ? 0 : tag.text.length + 2)
+
+            return (
+            <Box key={`row-${finding.n}`} flexDirection="row">
               <Button
                 key={`f-${finding.n}`}
-                label={findingLabel(finding, columns)}
+                label={findingLabel(finding, width)}
                 plain
                 dimColor={isGrey}
                 hotkey={order.indexOf(finding.n) < 9 ? String(order.indexOf(finding.n) + 1) : undefined}
                 hover={{ color: 'cyan' }}
                 onPress={() => actions.open(finding.n)}
               />
+              {tag !== null && (
+                <Text color={tag.color} dimColor={tag.color === undefined}>
+                  {'  '}
+                  {tag.text}
+                </Text>
+              )}
             </Box>
-          ))}
+            )
+          })}
         </Box>
       ))}
       <Text dimColor>{TIPS[review.mode]}</Text>

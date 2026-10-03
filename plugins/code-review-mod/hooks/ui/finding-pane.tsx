@@ -1,4 +1,4 @@
-import type { Finding } from '../../types'
+import type { Finding, Mode } from '../../types'
 
 import type { Parts } from './parts'
 import { findingLabel } from './rows'
@@ -6,6 +6,9 @@ import { findingLabel } from './rows'
 /** What the buttons in the finding pane do. */
 export type FindingActions = {
   back: () => void | Promise<void>
+  fix: () => void | Promise<void>
+  wontFix: () => void | Promise<void>
+  ask: () => void | Promise<void>
 }
 
 /** The suggested change as a diff: the code now as removed lines, the suggestion as added ones. */
@@ -18,7 +21,7 @@ export function suggestionDiff(finding: Finding): string {
 }
 
 /** Draws one finding: the code now, the suggested code, then why it matters. */
-export function drawFindingPane({ Box, Text, Button, Code }: Parts, finding: Finding, columns: number, actions: FindingActions) {
+export function drawFindingPane({ Box, Text, Button, Code }: Parts, finding: Finding, mode: Mode, columns: number, actions: FindingActions) {
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between">
@@ -49,6 +52,14 @@ export function drawFindingPane({ Box, Text, Button, Code }: Parts, finding: Fin
         <Text bold>Why it matters</Text>
         <Text>{finding.why}</Text>
       </Box>
+
+      {mode === 'mine' && (
+        <Box flexDirection="row" columnGap={1} marginTop={1}>
+          <Button key="fix" label="Fix it" variant="primary" hotkey="f" onPress={actions.fix} />
+          <Button key="wontfix" label="Won't fix" hotkey="w" onPress={actions.wontFix} />
+          <Button key="ask" label="Ask Claude" hotkey="a" onPress={actions.ask} />
+        </Box>
+      )}
     </Box>
   )
 }
