@@ -1,14 +1,16 @@
 import type { Finding } from '../types'
 
 import { TODO_TOOL, TOOL } from './config'
+import { rewriteDraft } from './draft'
 import { flipMode } from './mode'
 import type { Ports } from './ports'
-import { setStatus } from './review'
+import { changeFinding, setStatus } from './review'
 
 type ViewPorts = Pick<Ports, 'view' | 'openPane'>
 
 /** Shows one finding. Esc (or the panel's close mark) goes back, see the ui.close hook. */
-export async function openFinding(p: ViewPorts, n: number) {
+export async function openFinding(p: ViewPorts & Pick<Ports, 'notice'>, n: number) {
+  await p.notice.update(() => '')
   await p.view.update(() => ({ kind: 'finding', n }))
   await p.openPane({ closeOnEscape: true })
 }
@@ -79,4 +81,42 @@ export async function askAbout(p: Pick<Ports, 'review' | 'fill'>, n: number) {
   if (finding !== undefined) {
     await p.fill(`About review finding #${n} (${finding.title}, ${finding.file}:${finding.line}): `)
   }
+}
+
+/** The Drop button: skip a finding on their PR. */
+export async function drop(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
+  await p.review.update(review => (review === null ? review : setStatus(review, n, 'dropped')))
+  await backToList(p)
+}
+
+/** Shows the Edit or Rewrite field under the draft. */
+export async function showInput(p: Pick<Ports, 'view' | 'notice'>, n: number, input: 'edit' | 'rewrite') {
+  await p.notice.update(() => '')
+  await p.view.update(() => ({ kind: 'finding', n, input }))
+}
+
+/** Saves an edited draft text. */
+export async function saveEdit(p: Pick<Ports, 'review' | 'view'>, n: number, text: string) {
+  if (text.trim() !== '') {
+    await p.review.update(review =>
+      review === null ? review : changeFinding(review, n, f => ({ ...f, draft: { text: text.trim(), hasCode: f.draft?.hasCode ?? f.suggested.trim() !== '' } })),
+    )
+  }
+  await p.view.update(() => ({ kind: 'finding', n }))
+}
+
+/** Rewrites a draft from the user's note through Claude; on no answer the draft stays and the panel says so. */
+export async function rewrite(p: Pick<Ports, 'review' | 'view' | 'notice' | 'complete'>, n: number, note: string) {
+  const finding = (await p.review.get())?.findings.find(f => f.n === n)
+  if (finding === undefined) {
+    return
+  }
+  await p.view.update(() => ({ kind: 'finding', n, isRewriting: true }))
+  const draft = await rewriteDraft(p, finding, note)
+  if (draft === undefined) {
+    await p.notice.update(() => 'Rewrite failed: Claude gave no usable answer. The draft is unchanged.')
+  } else {
+    await p.review.update(review => (review === null ? review : changeFinding(review, n, f => ({ ...f, draft }))))
+  }
+  await p.view.update(view => (view.kind === 'finding' && view.n === n ? { kind: 'finding', n } : view))
 }

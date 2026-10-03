@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ReviewInput } from '../types'
 
-import { askAbout, backToList, fixIt, openFinding, switchMode, wontFix } from './actions'
+import { askAbout, backToList, drop, fixIt, openFinding, rewrite, saveEdit, showInput, switchMode, wontFix } from './actions'
 import { PANE, PANE_TITLE, RULE, TOOL } from './config'
 import type { Ports } from './ports'
 import { TOOL_SPEC, runTool } from './review-tool'
@@ -100,13 +100,18 @@ export const register: Register = on => {
     const shown = await read($, view)
     const current = await read($, review)
     const finding = shown.kind === 'finding' ? current?.findings.find(f => f.n === shown.n) : undefined
-    if (current !== null && finding !== undefined) {
+    if (current !== null && finding !== undefined && shown.kind === 'finding') {
       const n = finding.n
-      return drawFindingPane(parts, finding, current.mode, columns, {
+      return drawFindingPane(parts, { finding, mode: current.mode, view: shown, notice: await read($, notice), columns }, {
         back: () => backToList(ports($)),
         fix: () => fixIt(ports($), n),
         wontFix: () => wontFix(ports($), n),
         ask: () => askAbout(ports($), n),
+        drop: () => drop(ports($), n),
+        edit: () => showInput(ports($), n, 'edit'),
+        saveEdit: text => saveEdit(ports($), n, text),
+        rewrite: () => showInput(ports($), n, 'rewrite'),
+        sendRewrite: note => rewrite(ports($), n, note),
       })
     }
 

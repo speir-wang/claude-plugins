@@ -1,4 +1,6 @@
-import type { Finding, Mode } from '../../types'
+import type { Finding, Mode, View } from '../../types'
+
+import { draftBody } from '../draft'
 
 import type { Parts } from './parts'
 import { findingLabel } from './rows'
@@ -9,6 +11,20 @@ export type FindingActions = {
   fix: () => void | Promise<void>
   wontFix: () => void | Promise<void>
   ask: () => void | Promise<void>
+  drop: () => void | Promise<void>
+  edit: () => void | Promise<void>
+  saveEdit: (text: string) => void | Promise<void>
+  rewrite: () => void | Promise<void>
+  sendRewrite: (note: string) => void | Promise<void>
+}
+
+/** What the finding pane shows besides the finding. */
+export type FindingData = {
+  finding: Finding
+  mode: Mode
+  view: Extract<View, { kind: 'finding' }>
+  notice: string
+  columns: number
 }
 
 /** The suggested change as a diff: the code now as removed lines, the suggestion as added ones. */
@@ -21,7 +37,14 @@ export function suggestionDiff(finding: Finding): string {
 }
 
 /** Draws one finding: the code now, the suggested code, then why it matters. */
-export function drawFindingPane({ Box, Text, Button, Code }: Parts, finding: Finding, mode: Mode, columns: number, actions: FindingActions) {
+export function drawFindingPane(parts: Parts, data: FindingData, actions: FindingActions) {
+  const { Box, Text, Button, Code } = parts
+  // Mobile has no text field: Edit and Rewrite show nothing there.
+  const Input = 'Input' in parts ? parts.Input : undefined
+  const { finding, mode, view, notice, columns } = data
+  const draft = finding.draft ?? { text: '', hasCode: finding.suggested.trim() !== '' }
+  const hasCode = draft.hasCode && finding.suggested.trim() !== ''
+
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between">
@@ -52,6 +75,30 @@ export function drawFindingPane({ Box, Text, Button, Code }: Parts, finding: Fin
         <Text bold>Why it matters</Text>
         <Text>{finding.why}</Text>
       </Box>
+
+      {mode === 'theirs' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Comment for the author</Text>
+          <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+            {draft.text === '' ? <Text dimColor>No draft yet. Press Rewrite and say what to write.</Text> : <Text>{draft.text}</Text>}
+            {hasCode && <Code source={finding.suggested} path={finding.file} />}
+          </Box>
+          {view.input === 'edit' && Input !== undefined && (
+            <Input key="edit-input" label="Edit: " value={draft.text} submitLabel="save" autoFocus onSubmit={actions.saveEdit} />
+          )}
+          {view.input === 'rewrite' && Input !== undefined && (
+            <Input key="rewrite-input" label="Rewrite: " placeholder="softer, drop the code, …" submitLabel="rewrite" autoFocus onSubmit={actions.sendRewrite} />
+          )}
+          {view.isRewriting === true && <Text dimColor>Rewriting…</Text>}
+          <Box flexDirection="row" columnGap={1} marginTop={1}>
+            <Button key="drop" label="Drop" hotkey="d" onPress={actions.drop} />
+            <Button key="edit" label="Edit" hotkey="e" onPress={actions.edit} />
+            <Button key="rewrite" label="Rewrite" hotkey="r" onPress={actions.rewrite} />
+          </Box>
+        </Box>
+      )}
+
+      {notice !== '' && <Text color="yellow">{notice}</Text>}
 
       {mode === 'mine' && (
         <Box flexDirection="row" columnGap={1} marginTop={1}>

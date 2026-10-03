@@ -379,3 +379,71 @@ test('"fix 3" in chat works through set-status, and fixed marks it done', async 
   expect((await review($, { action: 'set-status', number: 9, status: 'fixed' })).isError).toBe(true)
   expect((await review($, { action: 'set-status', number: 1, status: 'posted' })).isError).toBe(true)
 })
+
+const THEIRS = { ...FINDING, comment: 'Could this number get a name, so readers know it is the retry wait?' }
+
+/** Starts a review of their PR with one finding and opens it in the pane. */
+async function openTheirs($: Engine, finding: Record<string, unknown> = THEIRS) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+  await review($, finding)
+  const drawn = await pane($)
+  await drawn.press({ key: 'f-1' })
+  return drawn
+}
+
+test('on their PR a finding shows the comment draft under why it matters, with the suggested code', async ($, on) => {
+  world(on)
+  const drawn = await openTheirs($)
+
+  const shown = await texts(drawn)
+  expect(shown.indexOf('Why it matters')).toBeLessThan(shown.indexOf('Comment for the author'))
+  expect(shown).toContain('Could this number get a name, so readers know it is the retry wait?')
+  expect((await drawn.findAll({ type: 'Code' })).map(c => c.props.source)).toContain('const RETRY_MS = 3000')
+  expect(await drawn.find({ key: 'fix' })).toBeUndefined()
+  for (const key of ['drop', 'edit', 'rewrite']) expect(await drawn.find({ key })).toBeDefined()
+})
+
+test('Drop skips a finding on their PR', async ($, on) => {
+  world(on)
+  const drawn = await openTheirs($)
+
+  await drawn.press({ key: 'drop' })
+
+  expect(await texts(drawn)).toContain('dropped')
+  expect(await texts(drawn)).toContain('0 open · 0 pending · 1 done')
+})
+
+test('Edit changes the draft text directly', async ($, on) => {
+  world(on)
+  const drawn = await openTheirs($)
+
+  await drawn.press({ key: 'edit' })
+  await drawn.input({ key: 'edit-input', text: 'Maybe name this constant?' })
+
+  expect(await texts(drawn)).toContain('Maybe name this constant?')
+  expect(await drawn.find({ key: 'edit-input' })).toBeUndefined()
+})
+
+test('Rewrite sends the draft and a note to Claude and shows the new draft', async ($, on) => {
+  const w = world(on)
+  const drawn = await openTheirs($)
+  w.rewrite = '{"text": "Would a named constant help here?", "hasCode": false}'
+
+  await drawn.press({ key: 'rewrite' })
+  await drawn.input({ key: 'rewrite-input', text: 'softer, drop the code' })
+
+  expect(await texts(drawn)).toContain('Would a named constant help here?')
+  expect((await drawn.findAll({ type: 'Code' })).map(c => c.props.source)).not.toContain('const RETRY_MS = 3000')
+})
+
+test('a rewrite with no answer keeps the draft and says so', async ($, on) => {
+  world(on)
+  const drawn = await openTheirs($)
+
+  await drawn.press({ key: 'rewrite' })
+  await drawn.input({ key: 'rewrite-input', text: 'softer' })
+
+  expect(await texts(drawn)).toContain('Could this number get a name, so readers know it is the retry wait?')
+  expect((await texts(drawn)).join(' ')).toMatch('Rewrite failed')
+})
