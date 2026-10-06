@@ -67,6 +67,12 @@ export type Review = {
   skipped: { group: Group; reason: string; round: number }[]
 }
 
+/** Lines `start` to `end` of a file, both included. */
+export type LineRange = { start: number; end: number }
+
+/** The PR's diff as last fetched: each file's new-side ranges, null when GitHub gave no patch. */
+export type DiffCache = { key: string; files: Record<string, LineRange[] | null> }
+
 /** A review of another PR that came in while one was showing. */
 export type Incoming = { review: Review; answer: 'ask' | 'keep' }
 
@@ -94,6 +100,8 @@ declare module 'claude-code' {
       isReviewing: boolean
       /** The last thing that went wrong, shown in the panel; '' for none. */
       notice: string
+      /** The PR's diff for the review's current head, so "add" can check a line is in it. */
+      diff: DiffCache | null
     }
   }
 }

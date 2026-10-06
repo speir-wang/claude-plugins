@@ -45,7 +45,7 @@ export async function postReview(p: Run, pr: string, head: string, event: Review
 }
 
 /** Reads a JSON-lines answer (`--jq '.[] | @json'`) into its items; bad lines are skipped. */
-function jsonLines<T>(text: string): T[] {
+export function jsonLines<T>(text: string): T[] {
   return text
     .split('\n')
     .filter(line => line.trim() !== '')
