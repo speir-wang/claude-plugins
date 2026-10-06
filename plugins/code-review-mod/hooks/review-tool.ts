@@ -55,11 +55,15 @@ const fail = (text: string): ToolAnswer => ({ text, isError: true })
 function recheckAnswer(review: Review): string {
   const round = currentRound(review)
   const since = review.rounds.at(-2)?.head ?? ''
-  const checks = toCheck(review).map(checkLine)
+  const found = toCheck(review)
+  const checks = found.map(checkLine)
+  const replied = found.some(f => (f.replies ?? []).length > 0)
+    ? ' Read the replies before you record an outcome: a reply can settle a finding without a code change (evidence it is fine, a follow-up PR), and then it is "addressed"; say which reply in the note. A question back is not addressed: say so in the note.'
+    : ''
   const todo =
     checks.length === 0
       ? 'No findings to check.'
-      : `Check each of these and record it with "outcome": ${checks.join('; ')}.`
+      : `Check each of these and record it with "outcome": ${checks.join('; ')}.${replied}`
 
   const comment = review.mode === 'theirs' ? ', each with a short, polite "comment" asked as a question' : ''
 

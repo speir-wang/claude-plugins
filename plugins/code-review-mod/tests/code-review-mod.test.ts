@@ -677,8 +677,9 @@ test('in a new session, starting their PR rebuilds the list from your GitHub com
   const started = await review($, { action: 'start', pr: 'acme/shop#7', mode: 'theirs', head: HEAD })
 
   expect(started.text).toMatch('Round 2')
-  expect(started.text).toMatch('#1 src/app.ts:12 Could 3000 get a name?')
-  expect(started.text).toMatch('#2 src/b.ts:4 Is this check needed?')
+  expect(started.text).toMatch('#1 src/app.ts:12 Could 3000 get a name? — author replied: "Done!"')
+  expect(started.text).toMatch('#2 src/b.ts:4 Is this check needed?. Read')
+  expect(started.text).toMatch('Read the replies before you record an outcome')
   expect(started.text).toMatch(`${OLD}..HEAD`)
   expect(started.text).toMatch('9-10 a bug or a broken spec')
   expect(started.text).toMatch('"comment"')
@@ -686,6 +687,7 @@ test('in a new session, starting their PR rebuilds the list from your GitHub com
 
   await review($, { action: 'outcome', number: 1, outcome: 'addressed' })
   await review($, { action: 'outcome', number: 2, outcome: 'missed', note: 'Still there' })
+  expect(await paneText($)).toMatch('author replied')
   const shown = await paneText($)
   expect(shown).toMatch('Your comments')
   expect(shown).toMatch('✅ addressed')

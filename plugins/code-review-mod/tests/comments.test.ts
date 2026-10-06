@@ -62,3 +62,19 @@ test('with no review found, the starting point is the newest comment\'s commit',
 test('no comments of yours means nothing to rebuild', () => {
   expect(rebuild([comment(1, 'author')], [reviewBy('me', C1, '2026-10-01T10:00:00Z')], 'me')).toBeNull()
 })
+
+test('each finding keeps the others\' replies since your last comment on its thread', () => {
+  const rebuilt = rebuild(
+    [
+      comment(1, 'me'),
+      comment(2, 'author', { in_reply_to_id: 1, body: 'Why?' }),
+      comment(3, 'me', { in_reply_to_id: 1, body: 'Because it leaks.' }),
+      comment(5, 'author', { in_reply_to_id: 1, body: ' Fixed in #42. ' }),
+      comment(4, 'me'),
+    ],
+    [],
+    'me',
+  )
+
+  expect(rebuilt?.findings.map(f => f.replies)).toEqual([[{ author: 'author', body: 'Fixed in #42.' }], []])
+})

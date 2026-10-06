@@ -60,7 +60,7 @@ Run the review with a PR link. Each finding comes with a comment draft for the a
 
 Press **Re-check**, or say *"re-check"*. Each finding you acted on gets ✅ addressed, ⚠️ addressed wrongly, or ❌ not addressed. Every commit since the last review is reviewed again, and new problems show under **New in round 2**.
 
-On someone else's PR, just ask *"are my comments on https://github.com/… addressed?"*, even in a new session. The panel rebuilds the list from your own comments on GitHub. It counts the comments that start a thread, resolved ones included, and reviews from the commit of your last review.
+On someone else's PR, just ask *"are my comments on https://github.com/… addressed?"*, even in a new session. The panel rebuilds the list from your own comments on GitHub. It counts the comments that start a thread, resolved ones included, and reviews from the commit of your last review. Replies on each thread since your last comment there are read before an outcome is given: a reply can settle a finding without a code change. Rows with such replies show **author replied**, and the finding shows the replies.
 
 ### When nothing is left
 

@@ -83,6 +83,17 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
         <Text>{finding.why}</Text>
       </Box>
 
+      {(finding.replies ?? []).length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Replies on GitHub</Text>
+          {(finding.replies ?? []).map((reply, i) => (
+            <Text key={`reply-${i}`}>
+              {reply.author}: {reply.body}
+            </Text>
+          ))}
+        </Box>
+      )}
+
       {mode === 'theirs' && (
         <Box flexDirection="column" marginTop={1}>
           <Text bold>Comment for the author</Text>

@@ -1,4 +1,4 @@
-import type { Finding } from '../types'
+import type { Finding, Reply } from '../types'
 
 /** The fields of a GitHub PR review comment the re-check reads. */
 export type GitHubComment = {
@@ -23,9 +23,23 @@ function titleOf(body: string): string {
 }
 
 /**
+ * The replies by others on the thread `start` begins, after your last comment
+ * there. GitHub points every reply at the thread's first comment, and ids grow
+ * with time, so a larger id is a later comment.
+ */
+function repliesTo(start: GitHubComment, comments: GitHubComment[], me: string): Reply[] {
+  const thread = comments.filter(c => c.in_reply_to_id === start.id).sort((a, b) => a.id - b.id)
+  const lastMine = Math.max(start.id, ...thread.filter(c => c.user?.login === me).map(c => c.id))
+
+  return thread
+    .filter(c => c.id > lastMine && c.user !== null && c.user.login !== me)
+    .map(c => ({ author: c.user?.login ?? '', body: c.body.trim() }))
+}
+
+/**
  * Rebuilds a review from your own comments on GitHub: one finding per comment
  * that starts a thread (replies don't count; resolved threads do), marked
- * posted. `base` is the commit your latest submitted review was made on, else
+ * posted, with the others' replies since your last comment on the thread. `base` is the commit your latest submitted review was made on, else
  * the commit of your newest comment. Nothing when you have no comments there.
  */
 export function rebuild(comments: GitHubComment[], reviews: GitHubReview[], me: string): { findings: Finding[]; base: string } | null {
@@ -53,6 +67,7 @@ export function rebuild(comments: GitHubComment[], reviews: GitHubReview[], me: 
       why: '',
       draft: { text: c.body, hasCode: false },
       status: 'posted',
+      replies: repliesTo(c, comments, me),
     }),
   )
 
