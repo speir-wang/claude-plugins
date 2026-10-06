@@ -1,6 +1,6 @@
 {
   "name": "code-review-mod",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A review panel for the mattpocock-skills code-review skill: scored findings, fixes as todos, and comment drafts posted as one GitHub review",
   "author": {
     "name": "He Wang",
