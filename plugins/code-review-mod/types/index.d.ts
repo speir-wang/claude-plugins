@@ -17,6 +17,9 @@ export type FindingStatus = 'open' | 'queued' | 'fixing' | 'fixed' | 'wontfix' |
 /** A re-check's answer for one finding you acted on. */
 export type Outcome = 'addressed' | 'wrong' | 'missed'
 
+/** A reply on the GitHub thread of a finding, by someone other than you. */
+export type Reply = { author: string; body: string }
+
 /** The comment to post on their PR: text, plus the suggested code when `hasCode`. */
 export type Draft = { text: string; hasCode: boolean }
 
@@ -40,6 +43,8 @@ export type Finding = {
   why: string
   draft: Draft | null
   status: FindingStatus
+  /** On their PR: replies on its thread since your last comment there, oldest first. */
+  replies?: Reply[]
   outcome?: Outcome
   /** One line on why the outcome is what it is. */
   outcomeNote?: string

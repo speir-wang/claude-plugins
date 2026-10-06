@@ -16,9 +16,18 @@ export function toCheck(review: Review): Finding[] {
   return review.findings.filter(f => f.round < currentRound(review) && acted.includes(f.status))
 }
 
-/** One finding as the re-check lists it for Claude. */
+/** A reply on one line, cut to `width` characters. */
+function excerpt(body: string, width = 200): string {
+  const flat = body.replace(/\s+/g, ' ').trim()
+
+  return flat.length > width ? `${flat.slice(0, width - 1)}…` : flat
+}
+
+/** One finding as the re-check lists it for Claude, with the replies on its thread. */
 export function checkLine(finding: Finding): string {
-  return `#${finding.n} ${finding.file}:${finding.line} ${finding.title}`
+  const replies = (finding.replies ?? []).map(r => `${r.author} replied: "${excerpt(r.body)}"`)
+
+  return [`#${finding.n} ${finding.file}:${finding.line} ${finding.title}`, ...replies].join(' — ')
 }
 
 /** Records a re-check outcome; a sentence naming the problem when the finding is not one to check. */

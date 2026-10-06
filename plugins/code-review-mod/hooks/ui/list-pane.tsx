@@ -6,7 +6,7 @@ import type { Section } from '../order'
 import { roundSummaries } from '../recheck'
 import { counts, nextStep } from '../review'
 import type { Parts } from './parts'
-import { findingLabel, outcomeTag, statusTag } from './rows'
+import { findingLabel, outcomeTag, replyTag, statusTag } from './rows'
 
 /** What the list pane shows. */
 export type ListData = {
@@ -122,7 +122,7 @@ export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actio
                 {section.note !== null && <Text dimColor>  {isReviewing && section.rows.length === 0 && !section.isSkipped ? 'reviewing…' : section.note}</Text>}
               </Box>
               {section.rows.map(({ finding, isGrey }) => {
-                const tags = [statusTag(finding.status), outcomeTag(finding)].filter(tag => tag !== null)
+                const tags = [statusTag(finding.status), replyTag(finding), outcomeTag(finding)].filter(tag => tag !== null)
                 // The tags sit after the title, so the title gives up their width.
                 const width = columns - numberWidth - tags.reduce((sum, tag) => sum + tag.text.length + 2, 0)
 
