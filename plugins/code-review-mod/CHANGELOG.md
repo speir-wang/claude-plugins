@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.0.0...code-review-mod-v1.1.0) (2026-10-06)
+
+
+### Features
+
+* **code-review-mod:** read the author's replies on a re-check of the… ([94a036f](https://github.com/speir-wang/claude-plugins/commit/94a036f83a8ae98137030ab8054b0c63652b0352))
+* **code-review-mod:** read the author's replies on a re-check of their PR ([0dcf539](https://github.com/speir-wang/claude-plugins/commit/0dcf539617c303300d373c1e8c25c7f7873b3bf4)), closes [#8](https://github.com/speir-wang/claude-plugins/issues/8)
+
 ## 1.0.0 (2026-10-03)
 
 
