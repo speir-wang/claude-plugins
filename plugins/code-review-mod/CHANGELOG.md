@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.1.0...code-review-mod-v1.1.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **code-review-mod:** reject "add" when the line is outside the PR diff ([c294ec8](https://github.com/speir-wang/claude-plugins/commit/c294ec80b5b745a3ce841ac63788ef2543e6752a))
+* **code-review-mod:** reject "add" when the line is outside the PR diff ([eb4dbd9](https://github.com/speir-wang/claude-plugins/commit/eb4dbd94d28a667d0d498d3fcb55a88b26fcbc5c))
+
 ## [1.1.0](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.0.0...code-review-mod-v1.1.0) (2026-10-06)
 
 
