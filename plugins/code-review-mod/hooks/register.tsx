@@ -42,6 +42,7 @@ const view = atom({ plugin: 'code-review-mod', key: 'view' } as const, { kind: '
 const shouldFocus = atom({ plugin: 'code-review-mod', key: 'shouldFocus' } as const, false)
 const isReviewing = atom({ plugin: 'code-review-mod', key: 'isReviewing' } as const, false)
 const notice = atom({ plugin: 'code-review-mod', key: 'notice' } as const, '')
+const diff = atom({ plugin: 'code-review-mod', key: 'diff' } as const, null)
 
 type $ = EngineInterface
 
@@ -93,6 +94,7 @@ function ports($: $): Ports {
     shouldFocus: { get: () => read($, shouldFocus), update: change => update($, shouldFocus, change) },
     isReviewing: { get: () => read($, isReviewing), update: change => update($, isReviewing, change) },
     notice: { get: () => read($, notice), update: change => update($, notice, change) },
+    diff: { get: () => read($, diff), update: change => update($, diff, change) },
   }
 }
 

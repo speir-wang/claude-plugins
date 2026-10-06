@@ -1029,3 +1029,59 @@ test('a rewrite answered in plain words becomes the draft and keeps the code; a 
   await drawn.press({ key: 'post' })
   expect(JSON.parse(w.stdin[POST]!).comments[0].body).toBe('Name it?')
 })
+
+const FILES = 'gh api repos/acme/shop/pulls/7/files'
+
+/** Fakes the PR's changed files: src/app.ts changes lines 10-14 and 30-31; logo.png has no patch. */
+function fakeFiles(w: World) {
+  w.answers[FILES] = [
+    JSON.stringify({ filename: 'src/app.ts', patch: '@@ -10,4 +10,5 @@ fn\n a\n+b\n c\n d\n e\n@@ -28,1 +30,2 @@\n x\n+y' }),
+    JSON.stringify({ filename: 'logo.png', patch: null }),
+  ].join('\n')
+}
+
+async function startTheirs($: Engine) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await review($, { action: 'start', pr: 'acme/shop#7', mode: 'theirs', head: HEAD })
+}
+
+test('on a PR, a finding on a line outside the diff is refused with the changed lines near it', async ($, on) => {
+  const w = world(on)
+  fakeFiles(w)
+  await startTheirs($)
+
+  const outside = await review($, { ...FINDING, line: 20 })
+  expect(outside.isError).toBe(true)
+  expect(outside.text).toBe('Not added: line 20 of src/app.ts is outside the diff (changed: 10-14, 30-31). Anchor it on a changed line.')
+
+  expect((await review($, FINDING)).isError).toBe(false)
+  expect((await review($, { ...FINDING, file: 'logo.png' })).isError).toBe(false)
+  // One fetch per PR and head.
+  expect(w.ran.filter(l => l.startsWith(FILES))).toHaveLength(1)
+})
+
+test('on a PR, a finding in a file the PR does not change is refused', async ($, on) => {
+  const w = world(on)
+  fakeFiles(w)
+  await startTheirs($)
+
+  const added = await review($, { ...FINDING, file: 'src/other.ts' })
+  expect(added.isError).toBe(true)
+  expect(added.text).toBe('Not added: src/other.ts is not changed in this PR.')
+})
+
+test('on a PR, a finding goes through when gh cannot read the diff', async ($, on) => {
+  const w = world(on)
+  w.answers[FILES] = { exitCode: 1, stderr: 'HTTP 404' }
+  await startTheirs($)
+
+  expect((await review($, { ...FINDING, line: 999 })).isError).toBe(false)
+})
+
+test('a branch review never reads the diff', async ($, on) => {
+  const w = world(on)
+  await startMine($)
+
+  expect((await review($, { ...FINDING, line: 999 })).isError).toBe(false)
+  expect(w.ran.some(l => l.includes('/files'))).toBe(false)
+})

@@ -1,6 +1,6 @@
 import type { ModelCompleteRequest, ModelCompleteResult } from 'claude-code'
 
-import type { Finding, Incoming, Review, View } from '../types'
+import type { DiffCache, Finding, Incoming, Review, View } from '../types'
 
 /** One value the plugin keeps in `$.state`, read and changed through two small calls. */
 export type Cell<T> = {
@@ -28,6 +28,7 @@ export type Ports = {
   shouldFocus: Cell<boolean>
   isReviewing: Cell<boolean>
   notice: Cell<string>
+  diff: Cell<DiffCache | null>
 }
 
 /** Changes the review shown; nothing happens while there is none. Answers the new review. */

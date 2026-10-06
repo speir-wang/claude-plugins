@@ -1,7 +1,8 @@
 import type { Finding, FindingStatus, Group, Outcome, Review, ReviewInput } from '../types'
 
 import { SCORE_SCALE, TOOL_NAME } from './config'
-import { hasPr, readMyComments } from './github'
+import { isInDiff } from './diff-lines'
+import { hasPr, readMyComments, splitPr } from './github'
 import { pickMode, readPr } from './mode'
 import { GROUP_LABELS } from './order'
 import { OUTCOME_LABELS, applyOutcome, checkLine, toCheck } from './recheck'
@@ -47,7 +48,7 @@ export const TOOL_SPEC = {
 export type ToolAnswer = { text: string; isError?: true }
 
 /** What serving the tool needs. */
-export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'shouldFocus' | 'isReviewing' | 'run'>
+export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'shouldFocus' | 'isReviewing' | 'run' | 'diff'>
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
@@ -183,6 +184,28 @@ function readSkip(input: ReviewInput): { group: Group; reason: string } | string
 }
 
 /**
+ * Why GitHub would refuse an inline comment on the finding's line, or nothing.
+ * Only a PR is checked: a branch review is never posted inline. When gh can't
+ * tell, the finding goes through.
+ */
+async function outsideDiff(p: ToolPorts, review: Review, finding: Finding): Promise<string | undefined> {
+  const head = review.rounds.at(-1)?.head
+  if (splitPr(review.pr) === undefined || head === undefined) {
+    return undefined
+  }
+  const found = await isInDiff(p, review.pr, head, finding.file, finding.line)
+  if (found.is === 'no-file') {
+    return `${finding.file} is not changed in this PR.`
+  }
+  if (found.is === 'out') {
+    const changed = found.near.map(r => (r.start === r.end ? `${r.start}` : `${r.start}-${r.end}`)).join(', ')
+    return `line ${finding.line} of ${finding.file} is outside the diff (changed: ${changed}). Anchor it on a changed line.`
+  }
+
+  return undefined
+}
+
+/**
  * Records "add" and "skipped" into the review being built: the one waiting
  * for "Replace?" when there is one, else the one shown. Once the user chose
  * to keep the old one, the new review's findings are let go, but Claude is
@@ -206,6 +229,10 @@ async function record(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
     const finding = readFinding(input, target)
     if (typeof finding === 'string') {
       return fail(`Not added: ${finding}`)
+    }
+    const outside = await outsideDiff(p, target, finding)
+    if (outside !== undefined) {
+      return fail(`Not added: ${outside}`)
     }
     await write(r => ({ ...r, findings: [...r.findings, finding] }))
     return { text: `Added #${finding.n}: ${finding.title}` }
