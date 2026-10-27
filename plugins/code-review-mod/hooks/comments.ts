@@ -1,9 +1,11 @@
 import type { Finding, Reply } from '../types'
 
+type GitHubUser = { login: string; type?: string } | null
+
 /** The fields of a GitHub PR review comment the re-check reads. */
 export type GitHubComment = {
   id: number
-  user: { login: string } | null
+  user: GitHubUser
   in_reply_to_id?: number
   path: string
   line: number | null
@@ -13,7 +15,10 @@ export type GitHubComment = {
 }
 
 /** The fields of a GitHub PR review the re-check reads. */
-export type GitHubReview = { user: { login: string } | null; commit_id: string; submitted_at: string | null; state: string }
+export type GitHubReview = { user: GitHubUser; commit_id: string; submitted_at: string | null; state: string; body?: string | null }
+
+/** The fields of a comment in the PR conversation the re-check reads. */
+export type GitHubIssueComment = { user: GitHubUser; body: string; created_at: string }
 
 /** The first line of a comment, as a short title. */
 function titleOf(body: string): string {
@@ -22,27 +27,52 @@ function titleOf(body: string): string {
   return first.length > 70 ? `${first.slice(0, 69)}…` : first
 }
 
+/** A comment as a reply; `isMine` when you wrote it. */
+function replyOf(user: GitHubUser, body: string, me: string): Reply {
+  const author = user?.login ?? ''
+
+  return author === me ? { author, body: body.trim(), isMine: true } : { author, body: body.trim() }
+}
+
 /**
- * The replies by others on the thread `start` begins, after your last comment
- * there. GitHub points every reply at the thread's first comment, and ids grow
- * with time, so a larger id is a later comment.
+ * Every reply on the thread `start` begins, yours included, so an agreement
+ * you gave in the thread is read too. GitHub points every reply at the
+ * thread's first comment, and ids grow with time, so a larger id is a later
+ * comment.
  */
 function repliesTo(start: GitHubComment, comments: GitHubComment[], me: string): Reply[] {
-  const thread = comments.filter(c => c.in_reply_to_id === start.id).sort((a, b) => a.id - b.id)
-  const lastMine = Math.max(start.id, ...thread.filter(c => c.user?.login === me).map(c => c.id))
+  return comments
+    .filter(c => c.in_reply_to_id === start.id && c.user !== null)
+    .sort((a, b) => a.id - b.id)
+    .map(c => replyOf(c.user, c.body, me))
+}
 
-  return thread
-    .filter(c => c.id > lastMine && c.user !== null && c.user.login !== me)
-    .map(c => ({ author: c.user?.login ?? '', body: c.body.trim() }))
+/** The PR conversation: its comments and the review bodies, from people (bots left out), oldest first. */
+function discussionOf(conversation: GitHubIssueComment[], reviews: GitHubReview[], me: string): Reply[] {
+  const said = [
+    ...conversation.map(c => ({ user: c.user, body: c.body, at: c.created_at })),
+    ...reviews.filter(r => r.submitted_at !== null).map(r => ({ user: r.user, body: r.body ?? '', at: r.submitted_at ?? '' })),
+  ]
+
+  return said
+    .filter(c => c.user !== null && c.user.type !== 'Bot' && c.body.trim() !== '')
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map(c => replyOf(c.user, c.body, me))
 }
 
 /**
  * Rebuilds a review from your own comments on GitHub: one finding per comment
  * that starts a thread (replies don't count; resolved threads do), marked
- * posted, with the others' replies since your last comment on the thread. `base` is the commit your latest submitted review was made on, else
- * the commit of your newest comment. Nothing when you have no comments there.
+ * posted, with every reply on its thread. `base` is the commit your latest
+ * submitted review was made on, else the commit of your newest comment.
+ * `discussion` is the PR conversation. Nothing when you have no comments there.
  */
-export function rebuild(comments: GitHubComment[], reviews: GitHubReview[], me: string): { findings: Finding[]; base: string } | null {
+export function rebuild(
+  comments: GitHubComment[],
+  reviews: GitHubReview[],
+  me: string,
+  conversation: GitHubIssueComment[] = [],
+): { findings: Finding[]; base: string; discussion: Reply[] } | null {
   const mine = comments.filter(c => c.user?.login === me && c.in_reply_to_id === undefined)
   if (mine.length === 0) {
     return null
@@ -71,5 +101,5 @@ export function rebuild(comments: GitHubComment[], reviews: GitHubReview[], me: 
     }),
   )
 
-  return { findings, base }
+  return { findings, base, discussion: discussionOf(conversation, reviews, me) }
 }

@@ -63,18 +63,45 @@ test('no comments of yours means nothing to rebuild', () => {
   expect(rebuild([comment(1, 'author')], [reviewBy('me', C1, '2026-10-01T10:00:00Z')], 'me')).toBeNull()
 })
 
-test('each finding keeps the others\' replies since your last comment on its thread', () => {
+test('each finding keeps every reply on its thread, yours marked, oldest first', () => {
   const rebuilt = rebuild(
     [
       comment(1, 'me'),
-      comment(2, 'author', { in_reply_to_id: 1, body: 'Why?' }),
-      comment(3, 'me', { in_reply_to_id: 1, body: 'Because it leaks.' }),
-      comment(5, 'author', { in_reply_to_id: 1, body: ' Fixed in #42. ' }),
+      comment(2, 'author', { in_reply_to_id: 1, body: 'Can I do it in a follow-up?' }),
+      comment(5, 'me', { in_reply_to_id: 1, body: ' OK, agreed. ' }),
       comment(4, 'me'),
     ],
     [],
     'me',
   )
 
-  expect(rebuilt?.findings.map(f => f.replies)).toEqual([[{ author: 'author', body: 'Fixed in #42.' }], []])
+  expect(rebuilt?.findings.map(f => f.replies)).toEqual([
+    [
+      { author: 'author', body: 'Can I do it in a follow-up?' },
+      { author: 'me', body: 'OK, agreed.', isMine: true },
+    ],
+    [],
+  ])
+})
+
+test('the discussion is the PR conversation and review bodies by people, oldest first', () => {
+  const rebuilt = rebuild(
+    [comment(1, 'me')],
+    [
+      { ...reviewBy('author', C2, '2026-10-02T10:00:00Z'), body: 'Leaving the retry for later, as agreed.' },
+      { ...reviewBy('me', C1, '2026-10-01T10:00:00Z'), body: '' },
+    ],
+    'me',
+    [
+      { user: { login: 'me' }, body: 'Fine to skip the rename.', created_at: '2026-10-03T10:00:00Z' },
+      { user: { login: 'ci', type: 'Bot' }, body: 'Coverage 80%', created_at: '2026-10-01T11:00:00Z' },
+      { user: { login: 'author' }, body: 'Can I skip the rename?', created_at: '2026-10-01T12:00:00Z' },
+    ],
+  )
+
+  expect(rebuilt?.discussion).toEqual([
+    { author: 'author', body: 'Can I skip the rename?' },
+    { author: 'author', body: 'Leaving the retry for later, as agreed.' },
+    { author: 'me', body: 'Fine to skip the rename.', isMine: true },
+  ])
 })

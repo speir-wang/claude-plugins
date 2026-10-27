@@ -72,7 +72,7 @@ test('a check line names the number, place and title', () => {
   expect(checkLine(finding(3, 'fixed'))).toBe('#3 a.ts:3 F3')
 })
 
-test('a check line lists each reply on one line, cut short', () => {
+test('a check line lists each reply in full, on one line', () => {
   const replies = [
     { author: 'author', body: 'Done in\na follow-up PR.' },
     { author: 'bot', body: 'x'.repeat(300) },
@@ -80,5 +80,14 @@ test('a check line lists each reply on one line, cut short', () => {
   const line = checkLine({ ...finding(3, 'posted'), replies })
 
   expect(line).toMatch('#3 a.ts:3 F3 — author replied: "Done in a follow-up PR."')
-  expect(line).toMatch(`bot replied: "${'x'.repeat(199)}…"`)
+  expect(line).toMatch(`bot replied: "${'x'.repeat(300)}"`)
+})
+
+test('a check line names your own replies as "you"', () => {
+  const replies = [
+    { author: 'author', body: 'Follow-up PR?' },
+    { author: 'me', body: 'Agreed.', isMine: true },
+  ]
+
+  expect(checkLine({ ...finding(3, 'posted'), replies })).toBe('#3 a.ts:3 F3 — author replied: "Follow-up PR?" — you replied: "Agreed."')
 })

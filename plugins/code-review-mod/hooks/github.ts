@@ -1,7 +1,7 @@
-import type { Finding, ReviewEvent } from '../types'
+import type { Finding, Reply, ReviewEvent } from '../types'
 
 import { rebuild } from './comments'
-import type { GitHubComment, GitHubReview } from './comments'
+import type { GitHubComment, GitHubIssueComment, GitHubReview } from './comments'
 import { draftBody } from './draft'
 import type { Ports } from './ports'
 
@@ -60,21 +60,27 @@ export function jsonLines<T>(text: string): T[] {
 
 /**
  * Rebuilds a review of their PR from your own comments on GitHub, for a
- * re-check in any session. Nothing when gh can't tell who you are or you have
- * no comments there.
+ * re-check in any session, with the PR conversation. Nothing when gh can't
+ * tell who you are or you have no comments there.
  */
-export async function readMyComments(p: Run, pr: string): Promise<{ findings: Finding[]; base: string } | null> {
+export async function readMyComments(p: Run, pr: string): Promise<{ findings: Finding[]; base: string; discussion: Reply[] } | null> {
   const place = splitPr(pr)
   const me = (await p.run(['gh', 'api', 'user', '--jq', '.login'])).stdout.trim()
   if (place === undefined || me === '') {
     return null
   }
-  const list = async (what: 'comments' | 'reviews') => {
-    const ran = await p.run(['gh', 'api', `repos/${place.repo}/pulls/${place.number}/${what}`, '--paginate', '--jq', '.[] | @json'])
+  const list = async (path: string) => {
+    const ran = await p.run(['gh', 'api', `repos/${place.repo}/${path}`, '--paginate', '--jq', '.[] | @json'])
     return ran.exitCode === 0 ? ran.stdout : ''
   }
 
-  return rebuild(jsonLines<GitHubComment>(await list('comments')), jsonLines<GitHubReview>(await list('reviews')), me)
+  return rebuild(
+    jsonLines<GitHubComment>(await list(`pulls/${place.number}/comments`)),
+    jsonLines<GitHubReview>(await list(`pulls/${place.number}/reviews`)),
+    me,
+    // The PR conversation lives on the issue behind the PR.
+    jsonLines<GitHubIssueComment>(await list(`issues/${place.number}/comments`)),
+  )
 }
 
 /** Whether the branch already has a PR on GitHub; false when gh can't tell. */

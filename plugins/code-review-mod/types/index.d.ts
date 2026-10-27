@@ -17,8 +17,8 @@ export type FindingStatus = 'open' | 'queued' | 'fixing' | 'fixed' | 'wontfix' |
 /** A re-check's answer for one finding you acted on. */
 export type Outcome = 'addressed' | 'wrong' | 'missed'
 
-/** A reply on the GitHub thread of a finding, by someone other than you. */
-export type Reply = { author: string; body: string }
+/** A comment on GitHub after the one a finding came from: on its thread, or in the PR conversation. `isMine` when you wrote it. */
+export type Reply = { author: string; body: string; isMine?: boolean }
 
 /** The comment to post on their PR: text, plus the suggested code when `hasCode`. */
 export type Draft = { text: string; hasCode: boolean }
@@ -43,7 +43,7 @@ export type Finding = {
   why: string
   draft: Draft | null
   status: FindingStatus
-  /** On their PR: replies on its thread since your last comment there, oldest first. */
+  /** On their PR: every reply on its thread, yours included, oldest first. */
   replies?: Reply[]
   outcome?: Outcome
   /** One line on why the outcome is what it is. */
@@ -63,6 +63,8 @@ export type Review = {
   hasPr?: boolean
   rounds: Round[]
   findings: Finding[]
+  /** On their PR: the comments in the PR conversation and the review bodies, oldest first. */
+  discussion?: Reply[]
   /** Groups that did not run, with why, by round. */
   skipped: { group: Group; reason: string; round: number }[]
 }
