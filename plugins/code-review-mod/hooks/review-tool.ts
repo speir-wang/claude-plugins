@@ -1,11 +1,11 @@
-import type { Finding, FindingStatus, Group, Outcome, Review, ReviewInput } from '../types'
+import type { Finding, FindingStatus, Group, Outcome, Reply, Review, ReviewInput } from '../types'
 
 import { SCORE_SCALE, TOOL_NAME } from './config'
 import { isInDiff } from './diff-lines'
 import { hasPr, readMyComments, splitPr } from './github'
 import { pickMode, readPr } from './mode'
 import { GROUP_LABELS } from './order'
-import { OUTCOME_LABELS, applyOutcome, checkLine, toCheck } from './recheck'
+import { OUTCOME_LABELS, applyOutcome, checkLine, replyLine, toCheck } from './recheck'
 import { changeReview, findingOf } from './ports'
 import type { Ports } from './ports'
 import { currentRound, newReview, nextRound, readFinding, setStatus, skipGroup } from './review'
@@ -58,13 +58,16 @@ function recheckAnswer(review: Review): string {
   const since = review.rounds.at(-2)?.head ?? ''
   const found = toCheck(review)
   const checks = found.map(checkLine)
-  const replied = found.some(f => (f.replies ?? []).length > 0)
-    ? ' Read the replies before you record an outcome: a reply can settle a finding without a code change (evidence it is fine, a follow-up PR), and then it is "addressed"; say which reply in the note. A question back is not addressed: say so in the note.'
-    : ''
+  const discussion = review.discussion ?? []
+  const said = discussion.length === 0 ? '' : ` PR conversation, oldest first: ${discussion.map(r => replyLine(r, 'said')).join('; ')}.`
+  const replied =
+    found.some(f => (f.replies ?? []).length > 0) || discussion.length > 0
+      ? ' Read the replies and the PR conversation before you record an outcome: they can settle a finding without a code change, and then it is "addressed"; say which reply in the note. That covers evidence it is fine, a follow-up PR, and "you" (the user) agreeing to leave it as is or do it later. A question back is not addressed: say so in the note.'
+      : ''
   const todo =
     checks.length === 0
       ? 'No findings to check.'
-      : `Check each of these and record it with "outcome": ${checks.join('; ')}.${replied}`
+      : `Check each of these and record it with "outcome": ${checks.join('; ')}.${said}${replied}`
 
   const comment = review.mode === 'theirs' ? ', each with a short, polite "comment" asked as a question' : ''
 
@@ -72,8 +75,8 @@ function recheckAnswer(review: Review): string {
 }
 
 /** A review of their PR rebuilt from your GitHub comments, its re-check round open at `head`. */
-function fromComments(pr: string, head: string, rebuilt: { findings: Finding[]; base: string }): Review {
-  return { pr, mode: 'theirs', rounds: [{ n: 1, head: rebuilt.base }, { n: 2, head }], findings: rebuilt.findings, skipped: [] }
+function fromComments(pr: string, head: string, rebuilt: { findings: Finding[]; base: string; discussion: Reply[] }): Review {
+  return { pr, mode: 'theirs', rounds: [{ n: 1, head: rebuilt.base }, { n: 2, head }], findings: rebuilt.findings, discussion: rebuilt.discussion, skipped: [] }
 }
 
 /** Adds the findings not posted yet (open, in the pile, dropped) after the rebuilt ones, so no draft is lost. */

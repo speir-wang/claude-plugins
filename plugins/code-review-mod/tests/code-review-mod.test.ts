@@ -679,7 +679,7 @@ test('in a new session, starting their PR rebuilds the list from your GitHub com
   expect(started.text).toMatch('Round 2')
   expect(started.text).toMatch('#1 src/app.ts:12 Could 3000 get a name? — author replied: "Done!"')
   expect(started.text).toMatch('#2 src/b.ts:4 Is this check needed?. Read')
-  expect(started.text).toMatch('Read the replies before you record an outcome')
+  expect(started.text).toMatch('Read the replies and the PR conversation before you record an outcome')
   expect(started.text).toMatch(`${OLD}..HEAD`)
   expect(started.text).toMatch('9-10 a bug or a broken spec')
   expect(started.text).toMatch('"comment"')
@@ -693,6 +693,27 @@ test('in a new session, starting their PR rebuilds the list from your GitHub com
   expect(shown).toMatch('✅ addressed')
   expect(shown).toMatch('❌ not addressed')
   expect(shown).toMatch('Round 2 · ✅ 1  ⚠️ 0  ❌ 1 · 0 new')
+})
+
+test('a re-check passes on your agreement in the thread and the PR conversation, and agreeing counts as addressed', async ($, on) => {
+  const w = world(on)
+  fakeGitHub(w)
+  const line = (o: unknown) => JSON.stringify(o)
+  w.answers['gh api repos/acme/shop/pulls/7/comments'] = [
+    line({ id: 1, user: { login: 'me' }, path: 'src/app.ts', line: 12, body: 'Could 3000 get a name?' }),
+    line({ id: 2, user: { login: 'author' }, in_reply_to_id: 1, path: 'src/app.ts', line: 12, body: 'Follow-up PR?' }),
+    line({ id: 4, user: { login: 'me' }, in_reply_to_id: 1, path: 'src/app.ts', line: 12, body: 'Agreed.' }),
+  ].join('\n')
+  w.answers['gh api repos/acme/shop/issues/7/comments'] = line({ user: { login: 'author' }, body: 'Skipping the docs change for now.', created_at: '2026-10-02T10:00:00Z' })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', mode: 'theirs', head: HEAD })
+
+  expect(started.text).toMatch('— author replied: "Follow-up PR?" — you replied: "Agreed."')
+  expect(started.text).toMatch('PR conversation, oldest first: author said: "Skipping the docs change for now."')
+  expect(started.text).toMatch('"you" (the user) agreeing to leave it as is or do it later')
+  // Your reply came last: nothing new from the author to flag.
+  expect(await paneText($)).not.toMatch('author replied')
 })
 
 test('new problems on their PR get drafts and go through the same pending and submit flow', async ($, on) => {

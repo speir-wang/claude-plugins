@@ -1,4 +1,4 @@
-import type { Finding, Outcome, Review } from '../types'
+import type { Finding, Outcome, Reply, Review } from '../types'
 
 import { changeFinding, currentRound } from './review'
 
@@ -23,9 +23,14 @@ function excerpt(body: string, width = 200): string {
   return flat.length > width ? `${flat.slice(0, width - 1)}…` : flat
 }
 
+/** One reply as Claude reads it: "you" for your own, so it can tell your agreement from the author's word. */
+export function replyLine(reply: Reply, verb = 'replied'): string {
+  return `${reply.isMine === true ? 'you' : reply.author} ${verb}: "${excerpt(reply.body)}"`
+}
+
 /** One finding as the re-check lists it for Claude, with the replies on its thread. */
 export function checkLine(finding: Finding): string {
-  const replies = (finding.replies ?? []).map(r => `${r.author} replied: "${excerpt(r.body)}"`)
+  const replies = (finding.replies ?? []).map(r => replyLine(r))
 
   return [`#${finding.n} ${finding.file}:${finding.line} ${finding.title}`, ...replies].join(' — ')
 }

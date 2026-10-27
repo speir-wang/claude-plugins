@@ -88,7 +88,7 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
           <Text bold>Replies on GitHub</Text>
           {(finding.replies ?? []).map((reply, i) => (
             <Text key={`reply-${i}`}>
-              {reply.author}: {reply.body}
+              {reply.isMine === true ? 'you' : reply.author}: {reply.body}
             </Text>
           ))}
         </Box>

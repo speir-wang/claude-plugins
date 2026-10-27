@@ -76,7 +76,9 @@ export function statusTag(status: FindingStatus): Tag | null {
 
 /** "author replied" after a row whose GitHub thread has replies since your last comment. */
 export function replyTag(finding: Finding): Tag | null {
-  return (finding.replies ?? []).length > 0 ? { text: 'author replied', color: 'yellow' } : null
+  const last = (finding.replies ?? []).at(-1)
+
+  return last !== undefined && last.isMine !== true ? { text: 'author replied', color: 'yellow' } : null
 }
 
 /** The re-check's answer after a row, when there is one. */
