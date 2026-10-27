@@ -20,9 +20,6 @@ export type GitHubReview = { user: GitHubUser; commit_id: string; submitted_at: 
 /** The fields of a comment in the PR conversation the re-check reads. */
 export type GitHubIssueComment = { user: GitHubUser; body: string; created_at: string }
 
-/** The most PR conversation comments a re-check passes on: the newest ones. */
-const DISCUSSION_LIMIT = 30
-
 /** The first line of a comment, as a short title. */
 function titleOf(body: string): string {
   const first = body.trim().split('\n')[0]?.trim() ?? ''
@@ -50,10 +47,7 @@ function repliesTo(start: GitHubComment, comments: GitHubComment[], me: string):
     .map(c => replyOf(c.user, c.body, me))
 }
 
-/**
- * The PR conversation: its comments and the review bodies, from people (bots
- * left out), oldest first, the newest `DISCUSSION_LIMIT` of them.
- */
+/** The PR conversation: its comments and the review bodies, from people (bots left out), oldest first. */
 function discussionOf(conversation: GitHubIssueComment[], reviews: GitHubReview[], me: string): Reply[] {
   const said = [
     ...conversation.map(c => ({ user: c.user, body: c.body, at: c.created_at })),
@@ -63,7 +57,6 @@ function discussionOf(conversation: GitHubIssueComment[], reviews: GitHubReview[
   return said
     .filter(c => c.user !== null && c.user.type !== 'Bot' && c.body.trim() !== '')
     .sort((a, b) => a.at.localeCompare(b.at))
-    .slice(-DISCUSSION_LIMIT)
     .map(c => replyOf(c.user, c.body, me))
 }
 

@@ -16,16 +16,12 @@ export function toCheck(review: Review): Finding[] {
   return review.findings.filter(f => f.round < currentRound(review) && acted.includes(f.status))
 }
 
-/** A reply on one line, cut to `width` characters. */
-function excerpt(body: string, width = 200): string {
-  const flat = body.replace(/\s+/g, ' ').trim()
-
-  return flat.length > width ? `${flat.slice(0, width - 1)}…` : flat
-}
-
-/** One reply as Claude reads it: "you" for your own, so it can tell your agreement from the author's word. */
+/**
+ * One reply as Claude reads it, in full on one line: "you" for your own, so it
+ * can tell your agreement from the author's word.
+ */
 export function replyLine(reply: Reply, verb = 'replied'): string {
-  return `${reply.isMine === true ? 'you' : reply.author} ${verb}: "${excerpt(reply.body)}"`
+  return `${reply.isMine === true ? 'you' : reply.author} ${verb}: "${reply.body.replace(/\s+/g, ' ').trim()}"`
 }
 
 /** One finding as the re-check lists it for Claude, with the replies on its thread. */
