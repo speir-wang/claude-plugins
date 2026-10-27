@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.2](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.1.1...code-review-mod-v1.1.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **code-review-mod:** pass every reply and conversation comment to the re-check in full ([31fce14](https://github.com/speir-wang/claude-plugins/commit/31fce1417f720f0684ff2ab8d3409f7be0e33b2d))
+* **code-review-mod:** read your own replies and the PR conversation on a re-check ([4aba6aa](https://github.com/speir-wang/claude-plugins/commit/4aba6aad5d92596b66e8cb6f6c2bfd1e78d2a223))
+* **code-review-mod:** read your own replies and the PR conversation on a re-check ([f5cacc6](https://github.com/speir-wang/claude-plugins/commit/f5cacc6d7cc79def6db5573d3c3f61cecd34338b))
+
 ## [1.1.1](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.1.0...code-review-mod-v1.1.1) (2026-10-06)
 
 
