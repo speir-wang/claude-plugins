@@ -132,7 +132,12 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 - `add`: one finding. Its group (Standards/Spec), must fix or maybe, score, file, line, short title, code now, suggested code, why it matters, and on their PR the comment draft.
 - `skipped`: a group that didn't run, with the reason (for example, no spec).
 - `outcome`: a re-check result for one finding (addressed / addressed wrongly / not addressed).
-- `set-status`: the status of one finding.
+- `set-status`: the status of one finding. Only the statuses of the review's mode: open, queued, fixing, fixed, won't fix on yours; open, pending, dropped on theirs. Posted is set only by Submit review.
+- `edit`: changes the fields given for one finding, checked the same way as `add`. On a PR, a new file or line must be in the diff.
+- `remove`: deletes one finding. The other numbers stay.
+- `list`: the findings with their current numbers, so Claude acts on the right row after the numbers change at the end of a round.
+
+A finding posted on GitHub can't be edited, removed or given another status: GitHub holds it.
 
 Each call answers in one line. Its rows in the chat shrink to one line, like the todo tool's rows. Claude writes the score, both code blocks, the explanation and the draft when it records a finding, after the skill's sub-agents report back. The mod never reads inside the sub-agents.
 

@@ -30,6 +30,7 @@ Restart Claude Code after installing. It works on top of the `mattpocock-skills`
 1. Run the code-review skill. The panel opens by itself. The chat gets only the skill's one-line summary.
 2. Findings sit in two groups, **Standards** and **Spec**, sorted by score out of 10. Scores 1–2 are greyed out. **must fix** marks a finding that breaks a written rule or the spec; the rest are judgement calls.
 3. Rows are numbered #1, #2, … from top to bottom once the review ends. Say *"fix 3"* for row #3. Press a row to open it: the code now, the suggested code, then why it matters. ← Back or Esc returns.
+4. Change the list in chat. *"remove 3"* deletes #3; the other numbers stay. *"make #2 a 3"* or *"#4 isn't a must fix"* changes only that field of the finding. On their PR, *"drop 3"* and *"add 3 to the review"* work like the buttons. A comment already posted on GitHub can't be changed from the panel: change it on GitHub.
 
 ### Your own branch
 
