@@ -41,6 +41,7 @@ Run the review with no PR link. On each finding:
 | Add to fix list | `f` | Queues it. Nothing is fixed yet |
 | Won't fix | `w` | Closes it without changing code |
 | Ask Claude | `a` | Puts the finding in the prompt box, so you can ask about it |
+| Delete | `x` | Deletes the finding, after you confirm |
 
 You can also just say *"fix 3"*. Then press **N queued · Fix all**. After you confirm, Claude fixes the whole list in one commit, with a normal message about the change.
 
@@ -54,6 +55,7 @@ Run the review with a PR link. Each finding comes with a comment draft for the a
 | Drop | `d` | Skips the finding |
 | Edit | `e` | Change the draft's words directly |
 | Rewrite | `r` | Tell Claude how to change it: *"softer"*, *"drop the code"* |
+| Delete | `x` | Deletes the finding, after you confirm. Not shown once it is posted |
 
 **N pending · Submit review** posts every pending draft as one GitHub review, each comment on its line. You pick Comment (the default), Request changes or Approve, and confirm first.
 

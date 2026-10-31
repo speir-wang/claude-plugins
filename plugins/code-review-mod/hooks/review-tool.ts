@@ -8,7 +8,7 @@ import { GROUP_LABELS } from './order'
 import { OUTCOME_LABELS, applyOutcome, checkLine, replyLine, toCheck } from './recheck'
 import { changeReview, findingOf } from './ports'
 import type { Ports } from './ports'
-import { currentRound, editFinding, newReview, nextRound, readFinding, setStatus, skipGroup } from './review'
+import { currentRound, editFinding, newReview, nextRound, readFinding, removeFinding, setStatus, skipGroup } from './review'
 
 /** The review tool, as it is registered. */
 export const TOOL_SPEC = {
@@ -221,7 +221,7 @@ async function edit(p: ToolPorts, review: Review, input: ReviewInput): Promise<T
   return { text: `#${number} changed: ${edited.title}` }
 }
 
-/** "remove": deletes a finding. The other numbers stay, so "fix 3" still means the same row. */
+/** "remove": deletes a finding, the same as the panel's Delete. */
 async function remove(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   const { number } = input
   const finding = await findingOf(p, number)
@@ -231,7 +231,7 @@ async function remove(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
   if (finding.status === 'posted') {
     return fail(postedText(number))
   }
-  await changeReview(p, r => ({ ...r, findings: r.findings.filter(f => f.n !== number) }))
+  await changeReview(p, r => removeFinding(r, number))
   // The panel can't keep showing a finding that is gone.
   await p.view.update(view => (view.kind === 'finding' && view.n === number ? { kind: 'list' } : view))
   await p.shouldFocus.update(() => true)

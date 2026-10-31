@@ -168,7 +168,7 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
 **Tabs.** When a review or re-check finishes, the mod opens its own panel again so its tab comes to the front. It doesn't need to know about the todo panel.
 
 **Experiments (try first, keep only if we like it):**
-- Keys in the panel: ↑/↓ move, Enter opens, Esc goes back, and one letter per button (f fix, w won't fix, a ask, p add to review, d drop, e edit, r rewrite).
+- Keys in the panel: ↑/↓ move, Enter opens, Esc goes back, and one letter per button (f fix, w won't fix, a ask, p add to review, d drop, e edit, r rewrite, x delete).
 - Each mod bringing its own tab to the front when it changes.
 
 **Facts tested before building on them** (from the Claude Code 2.1.288 API):

@@ -21,8 +21,8 @@ export const TIPS = {
 
 /** The key hint at the bottom of a finding, by mode. ↑/↓ and Enter are the panel's own. */
 export const KEYS = {
-  mine: 'Keys: f add to fix list · w won\'t fix · a ask · Esc back',
-  theirs: 'Keys: p add to review · d drop · e edit · r rewrite · Esc back',
+  mine: 'Keys: f add to fix list · w won\'t fix · a ask · x delete · Esc back',
+  theirs: 'Keys: p add to review · d drop · e edit · r rewrite · x delete · Esc back',
 } as const
 
 export const SCORE_SCALE = '9-10 a bug or a broken spec; 6-8 fix before merging; 3-5 nice to have; 1-2 nitpick'

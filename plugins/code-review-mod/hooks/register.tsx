@@ -5,8 +5,11 @@ import type { Incoming, Review, ReviewInput } from '../types'
 
 import {
   askAbout,
+  askDelete,
   backToList,
+  cancelDelete,
   confirmStep,
+  deleteFinding,
   drop,
   openFinding,
   keepReview,
@@ -219,6 +222,9 @@ export const register: Register = on => {
         saveEdit: text => saveEdit(ports($), n, text),
         rewrite: () => showInput(ports($), n, 'rewrite'),
         sendRewrite: note => rewrite(ports($), n, note),
+        askDelete: () => askDelete(ports($), n),
+        confirmDelete: () => deleteFinding(ports($), n),
+        cancelDelete: () => cancelDelete(ports($), n),
       })
     }
 

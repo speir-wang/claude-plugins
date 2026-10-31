@@ -99,6 +99,11 @@ export function changeFinding(review: Review, n: number, change: (finding: Findi
   return { ...review, findings: review.findings.map(f => (f.n === n ? change(f) : f)) }
 }
 
+/** Deletes one finding. The other numbers stay, so "fix 3" still means the same row. */
+export function removeFinding(review: Review, n: number): Review {
+  return { ...review, findings: review.findings.filter(f => f.n !== n) }
+}
+
 /** Sets one finding's status. */
 export function setStatus(review: Review, n: number, status: FindingStatus): Review {
   return changeFinding(review, n, f => ({ ...f, status }))

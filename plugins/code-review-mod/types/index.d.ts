@@ -83,7 +83,7 @@ export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE'
 /** What the panel shows. */
 export type View =
   | { kind: 'list' }
-  | { kind: 'finding'; n: number; input?: 'edit' | 'rewrite'; isRewriting?: boolean }
+  | { kind: 'finding'; n: number; input?: 'edit' | 'rewrite'; isRewriting?: boolean; isDeleting?: boolean }
   | { kind: 'submit'; event: ReviewEvent }
   | { kind: 'confirm'; step: 'approve' | 'create' | 'fix' }
 

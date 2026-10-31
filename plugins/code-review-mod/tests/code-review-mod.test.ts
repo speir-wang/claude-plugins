@@ -887,7 +887,7 @@ test('each button in a finding on your PR has its letter, and the detail view sa
   world(on)
   const mine = await openMine($)
 
-  expect(await hotkeys(mine)).toEqual({ queue: 'f', wontfix: 'w', ask: 'a' })
+  expect(await hotkeys(mine)).toEqual({ queue: 'f', wontfix: 'w', ask: 'a', delete: 'x' })
   expect((await texts(mine)).join(' ')).toMatch('Esc back')
 })
 
@@ -895,7 +895,7 @@ test('each button in a finding on their PR has its letter', async ($, on) => {
   world(on)
   const theirs = await openTheirs($)
 
-  expect(await hotkeys(theirs)).toEqual({ pending: 'p', drop: 'd', edit: 'e', rewrite: 'r' })
+  expect(await hotkeys(theirs)).toEqual({ pending: 'p', drop: 'd', edit: 'e', rewrite: 'r', delete: 'x' })
 })
 
 test('when the review ends every row is numbered top to bottom, and "fix 3" means the third row', async ($, on) => {
@@ -1247,4 +1247,39 @@ test('remove, edit and list draw as one line in the chat', async ($, on) => {
     const row = await $.ui.mount({ plugin: 'code-review-mod', surface: 'terminal', component: 'ToolUse', requestId: `r${i}`, props: { tool_use_id: `r${i}`, tool: TOOL, input, isRunning: false, isErrored: false, isInterrupted: false, output: 'x' } as never })
     expect((await row.findAll({ type: 'Text' })).map(t => t.text).join('')).toMatch(line)
   }
+})
+
+test('Delete in a finding asks once, then deletes it; Cancel keeps it', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { ...FINDING, title: 'Trailing comma', score: 2 })
+  const drawn = await pane($)
+  await drawn.press({ key: 'f-1' })
+
+  await drawn.press({ key: 'delete' })
+  expect(await texts(drawn)).toContain("Delete #1? It can't be brought back.")
+  await drawn.press({ key: 'delete-cancel' })
+  expect(await drawn.find({ key: 'delete-confirm' })).toBeUndefined()
+  expect(await texts(drawn)).toContain('Name the magic number')
+
+  await drawn.press({ key: 'delete' })
+  await drawn.press({ key: 'delete-confirm' })
+  expect(await drawn.find({ key: 'back' })).toBeUndefined()
+  const shown = (await texts(drawn)).join('\n')
+  expect(shown).not.toMatch('Name the magic number')
+  expect(shown).toMatch('1 open · 0 pending · 0 done')
+  expect(String((await drawn.find({ key: 'f-2' }))?.props.label)).toMatch('Trailing comma')
+})
+
+test('a posted finding has no Delete button', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = '{"id": 1}'
+  const drawn = await openTheirs($)
+  await drawn.press({ key: 'pending' })
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'post' })
+
+  await drawn.press({ key: 'f-1' })
+  expect(await drawn.find({ key: 'delete' })).toBeUndefined()
 })
