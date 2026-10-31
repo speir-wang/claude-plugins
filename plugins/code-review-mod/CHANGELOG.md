@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.1.2...code-review-mod-v1.2.0) (2026-10-31)
+
+
+### Features
+
+* **code-review-mod:** Delete button in a finding ([f9b6322](https://github.com/speir-wang/claude-plugins/commit/f9b6322006e899b8e8cd6d66f43e7273e39d5234))
+* **code-review-mod:** remove, edit and list findings from chat ([451a908](https://github.com/speir-wang/claude-plugins/commit/451a908ac75c75681321616cee6edff5c9b67362))
+* **code-review-mod:** remove, edit and list findings; Delete button ([4ee5554](https://github.com/speir-wang/claude-plugins/commit/4ee5554b757588c6293084676ce1a93e5b8f091b))
+
 ## [1.1.2](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.1.1...code-review-mod-v1.1.2) (2026-10-27)
 
 
