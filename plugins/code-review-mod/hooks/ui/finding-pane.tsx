@@ -18,6 +18,9 @@ export type FindingActions = {
   saveEdit: (text: string) => void | Promise<void>
   rewrite: () => void | Promise<void>
   sendRewrite: (note: string) => void | Promise<void>
+  askDelete: () => void | Promise<void>
+  confirmDelete: () => void | Promise<void>
+  cancelDelete: () => void | Promise<void>
 }
 
 /** What the finding pane shows besides the finding. */
@@ -46,6 +49,8 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
   const { finding, mode, view, notice } = data
   const draft = finding.draft ?? { text: '', hasCode: finding.suggested.trim() !== '' }
   const hasCode = draft.hasCode && finding.suggested.trim() !== ''
+  // A posted finding is on GitHub: deleting it here would only hide it until the next re-check.
+  const deleteButton = finding.status === 'posted' ? null : <Button key="delete" label="Delete" hotkey="x" onPress={actions.askDelete} />
 
   return (
     <Box flexDirection="column">
@@ -119,6 +124,7 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
             <Button key="drop" label="Drop" hotkey="d" onPress={actions.drop} />
             <Button key="edit" label="Edit" hotkey="e" onPress={actions.edit} />
             <Button key="rewrite" label="Rewrite" hotkey="r" onPress={actions.rewrite} />
+            {deleteButton}
           </Box>
         </Box>
       )}
@@ -138,6 +144,17 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
           )}
           <Button key="wontfix" label="Won't fix" hotkey="w" onPress={actions.wontFix} />
           <Button key="ask" label="Ask Claude" hotkey="a" onPress={actions.ask} />
+          {deleteButton}
+        </Box>
+      )}
+
+      {view.isDeleting === true && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="yellow">Delete #{finding.n}? It can't be brought back.</Text>
+          <Box flexDirection="row" columnGap={1}>
+            <Button key="delete-confirm" label="Delete" variant="primary" onPress={actions.confirmDelete} />
+            <Button key="delete-cancel" label="Cancel" onPress={actions.cancelDelete} />
+          </Box>
         </Box>
       )}
 

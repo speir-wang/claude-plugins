@@ -30,6 +30,7 @@ Restart Claude Code after installing. It works on top of the `mattpocock-skills`
 1. Run the code-review skill. The panel opens by itself. The chat gets only the skill's one-line summary.
 2. Findings sit in two groups, **Standards** and **Spec**, sorted by score out of 10. Scores 1–2 are greyed out. **must fix** marks a finding that breaks a written rule or the spec; the rest are judgement calls.
 3. Rows are numbered #1, #2, … from top to bottom once the review ends. Say *"fix 3"* for row #3. Press a row to open it: the code now, the suggested code, then why it matters. ← Back or Esc returns.
+4. Change the list in chat. *"remove 3"* deletes #3; the other numbers stay. *"make #2 a 3"* or *"#4 isn't a must fix"* changes only that field of the finding. On their PR, *"drop 3"* and *"add 3 to the review"* work like the buttons. A comment already posted on GitHub can't be changed from the panel: change it on GitHub.
 
 ### Your own branch
 
@@ -40,6 +41,7 @@ Run the review with no PR link. On each finding:
 | Add to fix list | `f` | Queues it. Nothing is fixed yet |
 | Won't fix | `w` | Closes it without changing code |
 | Ask Claude | `a` | Puts the finding in the prompt box, so you can ask about it |
+| Delete | `x` | Deletes the finding, after you confirm |
 
 You can also just say *"fix 3"*. Then press **N queued · Fix all**. After you confirm, Claude fixes the whole list in one commit, with a normal message about the change.
 
@@ -53,6 +55,7 @@ Run the review with a PR link. Each finding comes with a comment draft for the a
 | Drop | `d` | Skips the finding |
 | Edit | `e` | Change the draft's words directly |
 | Rewrite | `r` | Tell Claude how to change it: *"softer"*, *"drop the code"* |
+| Delete | `x` | Deletes the finding, after you confirm. Not shown once it is posted |
 
 **N pending · Submit review** posts every pending draft as one GitHub review, each comment on its line. You pick Comment (the default), Request changes or Approve, and confirm first.
 

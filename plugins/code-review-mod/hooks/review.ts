@@ -51,6 +51,42 @@ export function readFinding(input: Record<string, unknown>, review: Review): Fin
   }
 }
 
+/** The fields "edit" may change. */
+export const EDITABLE = ['group', 'weight', 'score', 'file', 'line', 'title', 'now', 'suggested', 'why', 'comment'] as const
+
+/**
+ * One finding with the fields given in `input` changed, checked the same way
+ * as "add"; a sentence naming what is wrong when it can't. Its number, round,
+ * status, replies and outcome stay. The draft changes only when "comment" or
+ * "suggested" is given: "comment" "" removes it.
+ */
+export function editFinding(input: Record<string, unknown>, finding: Finding, review: Review): Finding | string {
+  const given = EDITABLE.filter(key => input[key] !== undefined)
+  if (given.length === 0) {
+    return `Nothing to change: give one of ${EDITABLE.join(', ')}.`
+  }
+  const merged = {
+    group: finding.group,
+    weight: finding.weight,
+    score: finding.score,
+    file: finding.file,
+    line: finding.line,
+    title: finding.title,
+    now: finding.now,
+    suggested: finding.suggested,
+    why: finding.why,
+    comment: finding.draft?.text ?? '',
+    ...Object.fromEntries(given.map(key => [key, input[key]])),
+  }
+  const read = readFinding(merged, review)
+  if (typeof read === 'string') {
+    return read
+  }
+  const isDraftChanged = given.includes('comment') || given.includes('suggested')
+
+  return { ...finding, ...read, n: finding.n, round: finding.round, status: finding.status, draft: isDraftChanged ? read.draft : finding.draft }
+}
+
 /** Marks a group as not run this round; a later call for the same group replaces the reason. */
 export function skipGroup(review: Review, group: Group, reason: string): Review {
   const round = currentRound(review)
@@ -61,6 +97,11 @@ export function skipGroup(review: Review, group: Group, reason: string): Review 
 /** Changes one finding. */
 export function changeFinding(review: Review, n: number, change: (finding: Finding) => Finding): Review {
   return { ...review, findings: review.findings.map(f => (f.n === n ? change(f) : f)) }
+}
+
+/** Deletes one finding. The other numbers stay, so "fix 3" still means the same row. */
+export function removeFinding(review: Review, n: number): Review {
+  return { ...review, findings: review.findings.filter(f => f.n !== n) }
 }
 
 /** Sets one finding's status. */

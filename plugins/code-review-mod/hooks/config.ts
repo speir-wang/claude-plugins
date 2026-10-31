@@ -21,8 +21,8 @@ export const TIPS = {
 
 /** The key hint at the bottom of a finding, by mode. ↑/↓ and Enter are the panel's own. */
 export const KEYS = {
-  mine: 'Keys: f add to fix list · w won\'t fix · a ask · Esc back',
-  theirs: 'Keys: p add to review · d drop · e edit · r rewrite · Esc back',
+  mine: 'Keys: f add to fix list · w won\'t fix · a ask · x delete · Esc back',
+  theirs: 'Keys: p add to review · d drop · e edit · r rewrite · x delete · Esc back',
 } as const
 
 export const SCORE_SCALE = '9-10 a bug or a broken spec; 6-8 fix before merging; 3-5 nice to have; 1-2 nitpick'
@@ -36,6 +36,9 @@ export const RULE = [
   `- When a group did not run, call ${TOOL} "skipped" with the group and the reason (for example "no spec found").`,
   '- In the chat, write only the skill\'s one-line summary: the count and the worst finding per group. Do not repeat the findings.',
   `- On their own PR, "fix 3" means: put #3 on the fix list with ${TOOL} "set-status" (number 3, status "queued"). Don't fix it yet: the user fixes the whole list at once with the panel's Fix all. "won't fix 3" is status "wontfix".`,
+  `- On a PR that is not the user's, "add 3 to the review" is ${TOOL} "set-status" with status "pending", and "drop 3" is status "dropped". Nothing is posted until the user presses Submit review.`,
+  `- When the user asks to remove or delete a finding, call ${TOOL} "remove" with its number. When they ask to change one (its score, weight, title, code, why or comment), call "edit" with the number and only the fields that change.`,
+  `- Numbers change when a review round ends. Before you act on a number from an earlier turn, call ${TOOL} "list" to see the current numbers.`,
   `- When you fix findings, call "set-status" with status "fixing" as you start and "fixed" when done. Make one commit for the fixes together, with a normal message about the change that does not mention a review.`,
   `- To re-check: call ${TOOL} "start" again with the same pr and the new head. Its answer lists the findings to check and the commit to review from. Record each one with "outcome" (number, outcome "addressed", "wrong" or "missed", note). Then run the code review on every commit since that commit, and record new problems with "add" as usual.`,
 ].join('\n')

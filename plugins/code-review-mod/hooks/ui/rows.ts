@@ -29,6 +29,15 @@ export function toolRowLine(input: ReviewInput): { icon: string; color: 'yellow'
     const look = input.outcome === 'addressed' || input.outcome === 'wrong' ? OUTCOME_LOOKS[input.outcome] : OUTCOME_LOOKS.missed
     return { ...look, text: `#${String(number)} ${text(input.note)}` }
   }
+  if (action === 'edit') {
+    return { icon: '•', color: undefined, text: `#${String(number)} edited` }
+  }
+  if (action === 'remove') {
+    return { icon: '✕', color: undefined, text: `#${String(number)} removed` }
+  }
+  if (action === 'list') {
+    return { icon: '•', color: undefined, text: 'Findings listed' }
+  }
 
   return { icon: '•', color: undefined, text: `#${String(number)} ${text(input.status)}` }
 }

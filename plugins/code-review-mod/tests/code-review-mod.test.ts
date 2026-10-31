@@ -887,7 +887,7 @@ test('each button in a finding on your PR has its letter, and the detail view sa
   world(on)
   const mine = await openMine($)
 
-  expect(await hotkeys(mine)).toEqual({ queue: 'f', wontfix: 'w', ask: 'a' })
+  expect(await hotkeys(mine)).toEqual({ queue: 'f', wontfix: 'w', ask: 'a', delete: 'x' })
   expect((await texts(mine)).join(' ')).toMatch('Esc back')
 })
 
@@ -895,7 +895,7 @@ test('each button in a finding on their PR has its letter', async ($, on) => {
   world(on)
   const theirs = await openTheirs($)
 
-  expect(await hotkeys(theirs)).toEqual({ pending: 'p', drop: 'd', edit: 'e', rewrite: 'r' })
+  expect(await hotkeys(theirs)).toEqual({ pending: 'p', drop: 'd', edit: 'e', rewrite: 'r', delete: 'x' })
 })
 
 test('when the review ends every row is numbered top to bottom, and "fix 3" means the third row', async ($, on) => {
@@ -1105,4 +1105,181 @@ test('a branch review never reads the diff', async ($, on) => {
 
   expect((await review($, { ...FINDING, line: 999 })).isError).toBe(false)
   expect(w.ran.some(l => l.includes('/files'))).toBe(false)
+})
+
+test('"remove 2" deletes the finding; the other numbers stay', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { ...FINDING, title: 'Retry loop never stops', score: 9 })
+  await review($, { ...FINDING, title: 'Trailing comma', score: 2 })
+
+  const removed = await review($, { action: 'remove', number: 2 })
+  expect(removed).toEqual({ text: 'Removed #2: Retry loop never stops', isError: false })
+  const shown = await paneText($)
+  expect(shown).not.toMatch('Retry loop never stops')
+  expect(shown).toMatch('#1 ')
+  expect(shown).toMatch('#3 ')
+  expect(shown).toMatch('2 open · 0 pending · 0 done')
+  expect((await review($, { action: 'remove', number: 2 })).isError).toBe(true)
+  expect((await review($, { ...FINDING, title: 'Next' })).text).toMatch('#4')
+})
+
+test('removing the finding the panel shows goes back to the list', async ($, on) => {
+  world(on)
+  const drawn = await openMine($)
+
+  await review($, { action: 'remove', number: 1 })
+
+  expect(await drawn.find({ key: 'back' })).toBeUndefined()
+  expect(await texts(drawn)).toContain('0 open · 0 pending · 0 done')
+})
+
+test('a posted finding cannot be removed, edited or given another status', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = '{"id": 1}'
+  const drawn = await openTheirs($)
+  await drawn.press({ key: 'pending' })
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'post' })
+
+  for (const input of [{ action: 'remove', number: 1 }, { action: 'edit', number: 1, score: 2 }, { action: 'set-status', number: 1, status: 'open' }]) {
+    const refused = await review($, input)
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toBe('#1 is posted on GitHub. Change or delete the comment there.')
+  }
+  expect(await texts(drawn)).toContain('✔ posted')
+})
+
+test('"edit" changes only the fields given, and refuses a bad value', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { action: 'set-status', number: 1, status: 'queued' })
+
+  const edited = await review($, { action: 'edit', number: 1, score: 8, weight: 'must', title: 'Name the retry wait' })
+  expect(edited).toEqual({ text: '#1 changed: Name the retry wait', isError: false })
+  const shown = await paneText($)
+  expect(shown).toMatch('8/10 must fix app.ts:12  Name the retry wait')
+  expect(shown).toMatch('in fix list')
+
+  const bad = await review($, { action: 'edit', number: 1, score: 0 })
+  expect(bad.isError).toBe(true)
+  expect(bad.text).toMatch('score')
+  expect((await review($, { action: 'edit', number: 1 })).text).toMatch('Nothing to change')
+  expect((await review($, { action: 'edit', number: 7, score: 3 })).isError).toBe(true)
+  expect(await paneText($)).toMatch('8/10')
+})
+
+test('"edit" on their PR changes the draft, and "comment" "" removes it', async ($, on) => {
+  world(on)
+  const drawn = await openTheirs($)
+
+  await review($, { action: 'edit', number: 1, comment: 'Could this be RETRY_MS?' })
+  expect(await texts(drawn)).toContain('Could this be RETRY_MS?')
+
+  await review($, { action: 'edit', number: 1, why: 'Readers guess what 3000 means.' })
+  expect(await texts(drawn)).toContain('Could this be RETRY_MS?')
+
+  await review($, { action: 'edit', number: 1, comment: '' })
+  expect(await texts(drawn)).not.toContain('Could this be RETRY_MS?')
+})
+
+test('"edit" on a PR refuses a new line outside the diff', async ($, on) => {
+  const w = world(on)
+  fakeFiles(w)
+  await startTheirs($)
+  await review($, FINDING)
+
+  const moved = await review($, { action: 'edit', number: 1, line: 20 })
+  expect(moved.isError).toBe(true)
+  expect(moved.text).toMatch('Not changed: line 20 of src/app.ts is outside the diff')
+  expect((await review($, { action: 'edit', number: 1, line: 30 })).isError).toBe(false)
+})
+
+test('"list" answers the numbers as the panel shows them after the review ends', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, { ...FINDING, title: 'Low', score: 2 })
+  await review($, { ...FINDING, title: 'High', score: 9, weight: 'must' })
+  await $.turn.complete(turnEnd())
+
+  const listed = await review($, { action: 'list' })
+  expect(listed.isError).toBe(false)
+  expect(listed.text).toBe('feature (your PR), round 1: #1 Standards 9/10 must fix src/app.ts:12 "High" open; #2 Standards 2/10 src/app.ts:12 "Low" open.')
+})
+
+test('"set-status" on their PR adds to the review and drops; fix list statuses are refused there', async ($, on) => {
+  const w = world(on)
+  const drawn = await openTheirs($)
+  await review($, { ...THEIRS, title: 'Second' })
+
+  const pending = await review($, { action: 'set-status', number: 1, status: 'pending' })
+  expect(pending.text).toMatch('Submit review')
+  expect(await review($, { action: 'set-status', number: 2, status: 'dropped' })).toEqual({ text: '#2 is dropped.', isError: false })
+  await drawn.press({ key: 'back' })
+  expect(await texts(drawn)).toContain('0 open · 1 pending · 1 done')
+  expect(w.ran).not.toContain(POST)
+
+  const queued = await review($, { action: 'set-status', number: 1, status: 'queued' })
+  expect(queued.isError).toBe(true)
+  expect(queued.text).toBe('On their PR "status" must be one of "open", "pending", "dropped".')
+})
+
+test('"set-status" on your PR refuses the statuses of their PR', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+
+  expect((await review($, { action: 'set-status', number: 1, status: 'pending' })).isError).toBe(true)
+  expect((await review($, { action: 'set-status', number: 1, status: 'dropped' })).isError).toBe(true)
+})
+
+test('remove, edit and list draw as one line in the chat', async ($, on) => {
+  world(on)
+  await startMine($)
+
+  for (const [i, [input, line]] of ([
+    [{ action: 'remove', number: 2 }, '#2 removed'],
+    [{ action: 'edit', number: 2, score: 3 }, '#2 edited'],
+    [{ action: 'list' }, 'Findings listed'],
+  ] as const).entries()) {
+    const row = await $.ui.mount({ plugin: 'code-review-mod', surface: 'terminal', component: 'ToolUse', requestId: `r${i}`, props: { tool_use_id: `r${i}`, tool: TOOL, input, isRunning: false, isErrored: false, isInterrupted: false, output: 'x' } as never })
+    expect((await row.findAll({ type: 'Text' })).map(t => t.text).join('')).toMatch(line)
+  }
+})
+
+test('Delete in a finding asks once, then deletes it; Cancel keeps it', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, FINDING)
+  await review($, { ...FINDING, title: 'Trailing comma', score: 2 })
+  const drawn = await pane($)
+  await drawn.press({ key: 'f-1' })
+
+  await drawn.press({ key: 'delete' })
+  expect(await texts(drawn)).toContain("Delete #1? It can't be brought back.")
+  await drawn.press({ key: 'delete-cancel' })
+  expect(await drawn.find({ key: 'delete-confirm' })).toBeUndefined()
+  expect(await texts(drawn)).toContain('Name the magic number')
+
+  await drawn.press({ key: 'delete' })
+  await drawn.press({ key: 'delete-confirm' })
+  expect(await drawn.find({ key: 'back' })).toBeUndefined()
+  const shown = (await texts(drawn)).join('\n')
+  expect(shown).not.toMatch('Name the magic number')
+  expect(shown).toMatch('1 open · 0 pending · 0 done')
+  expect(String((await drawn.find({ key: 'f-2' }))?.props.label)).toMatch('Trailing comma')
+})
+
+test('a posted finding has no Delete button', async ($, on) => {
+  const w = world(on)
+  w.answers[POST] = '{"id": 1}'
+  const drawn = await openTheirs($)
+  await drawn.press({ key: 'pending' })
+  await drawn.press({ key: 'submit' })
+  await drawn.press({ key: 'post' })
+
+  await drawn.press({ key: 'f-1' })
+  expect(await drawn.find({ key: 'delete' })).toBeUndefined()
 })

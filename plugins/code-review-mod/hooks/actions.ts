@@ -7,7 +7,7 @@ import { flipMode } from './mode'
 import { renumber } from './order'
 import { changeReview, findingOf } from './ports'
 import type { Ports } from './ports'
-import { changeFinding, setStatus } from './review'
+import { changeFinding, removeFinding, setStatus } from './review'
 
 type ViewPorts = Pick<Ports, 'view' | 'openPane'>
 
@@ -81,6 +81,24 @@ export async function askAbout(p: Pick<Ports, 'review' | 'fill'>, n: number) {
 /** The Drop button: skip a finding on their PR. */
 export async function drop(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
   await changeReview(p, review => setStatus(review, n, 'dropped'))
+  await backToList(p)
+}
+
+/** The Delete button: asks once in the finding, since a deleted finding can't come back. */
+export async function askDelete(p: Pick<Ports, 'view'>, n: number) {
+  await p.view.update(() => ({ kind: 'finding', n, isDeleting: true }))
+}
+
+/** Cancel on the Delete question: the finding stays. */
+export async function cancelDelete(p: Pick<Ports, 'view'>, n: number) {
+  await p.view.update(() => ({ kind: 'finding', n }))
+}
+
+/** Delete, once confirmed: the finding is gone and the list shows again. A posted one stays: GitHub holds it. */
+export async function deleteFinding(p: Pick<Ports, 'review'> & ViewPorts, n: number) {
+  if ((await findingOf(p, n))?.status !== 'posted') {
+    await changeReview(p, review => removeFinding(review, n))
+  }
   await backToList(p)
 }
 
