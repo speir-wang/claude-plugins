@@ -1,5 +1,7 @@
 import type { Finding, Group, Review } from '../types'
 
+import { levelRank } from './review'
+
 export type Row = { finding: Finding; isGrey: boolean }
 
 export type Section = {
@@ -16,17 +18,17 @@ export type Section = {
 export const GROUP_LABELS = { standards: 'Standards', spec: 'Spec', comment: 'Your comments' } as const
 
 /**
- * Splits findings into the Standards and Spec sections, each sorted by score
- * (highest first, ties in the order they came). Scores 1-2 are greyed out.
- * Findings rebuilt from your GitHub comments have no score: they get a third
+ * Splits findings into the Standards and Spec sections, each sorted by level
+ * (xhigh first, ties in the order they came). "low" is greyed out.
+ * Findings rebuilt from your GitHub comments have no level: they get a third
  * section, in the order posted, only when there are some.
  */
 export function groupFindings(findings: Finding[], skipped: { group: Group; reason: string }[]): Section[] {
   const section = (group: Group | 'comment'): Section => {
     const rows = findings
       .filter(f => f.group === group)
-      .sort((a, b) => b.score - a.score)
-      .map(finding => ({ finding, isGrey: finding.score > 0 && finding.score <= 2 }))
+      .sort((a, b) => levelRank(b.level) - levelRank(a.level))
+      .map(finding => ({ finding, isGrey: finding.level === 'low' }))
     const skip = skipped.find(s => s.group === group)
     const note = rows.length > 0 ? null : skip === undefined ? 'nothing found' : `skipped, ${skip.reason}`
 
@@ -39,7 +41,7 @@ export function groupFindings(findings: Finding[], skipped: { group: Group; reas
 
 /**
  * Numbers the round in progress the way the panel lists it: Standards then
- * Spec, by score, after every earlier round's numbers. Done once the round
+ * Spec, by level, after every earlier round's numbers. Done once the round
  * ends, so "fix 3" means the third row. `moved` maps old numbers to new.
  */
 export function renumber(review: Review): { review: Review; moved: Map<number, number> } {

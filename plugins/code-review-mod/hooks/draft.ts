@@ -32,7 +32,7 @@ export async function rewriteDraft(p: Pick<Ports, 'complete'>, finding: Finding,
     timeoutMs: 30000,
     system:
       'You rewrite one code review comment for the author of a pull request. Keep it short, polite and asked as a question. ' +
-      'Never mention a score or a Standards/Spec label. The suggested code is attached below the text when "hasCode" is true; never put code in the text.',
+      'Never mention a level or a Standards/Spec label. The suggested code is attached below the text when "hasCode" is true; never put code in the text.',
     prompt: [
       `File: ${finding.file}:${finding.line}`,
       `Problem: ${finding.title}. ${finding.why}`,

@@ -4,8 +4,11 @@ export type Mode = 'mine' | 'theirs'
 /** The two kinds of finding the skill reports. They are never mixed. */
 export type Group = 'standards' | 'spec'
 
-/** "must": a written rule is broken. "maybe": a judgement call. */
-export type Weight = 'must' | 'maybe'
+/** How much a finding matters, from the first level whose description fits. See LEVELS in config. */
+export type Level = 'low' | 'medium' | 'high' | 'xhigh'
+
+/** "confirmed": the failure was traced through the code. "likely": it can't be traced from the repo alone. */
+export type Confidence = 'confirmed' | 'likely'
 
 /**
  * Where a finding stands.
@@ -30,9 +33,9 @@ export type Finding = {
   round: number
   /** 'comment' for one rebuilt from your own comment on GitHub. */
   group: Group | 'comment'
-  weight: Weight
-  /** 1-10; 0 for one rebuilt from a comment, which has no score. */
-  score: number
+  /** null for one rebuilt from a comment, which has no level. */
+  level: Level | null
+  confidence: Confidence
   file: string
   line: number
   title: string
@@ -41,6 +44,10 @@ export type Finding = {
   /** The code suggested in its place; '' when there is none. */
   suggested: string
   why: string
+  /** What goes wrong: the inputs and state, and the wrong result. '' when none was given. */
+  scenario: string
+  /** The code read to check it, as file:line ranges. '' when none was given. */
+  evidence: string
   draft: Draft | null
   status: FindingStatus
   /** On their PR: every reply on its thread, yours included, oldest first. */

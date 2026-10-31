@@ -4,7 +4,7 @@ import { KEYS } from '../config'
 import { draftBody } from '../draft'
 
 import type { Parts } from './parts'
-import { scoreText, weightText } from './rows'
+import { levelText } from './rows'
 
 /** What the buttons in the finding pane do. */
 export type FindingActions = {
@@ -56,7 +56,7 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
     <Box flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between">
         <Text bold>
-          #{finding.n}  {scoreText(finding)}  {weightText(finding)}
+          #{finding.n}  {levelText(finding)}{finding.confidence === 'likely' ? '  not confirmed' : ''}
         </Text>
         <Button key="back" label="← Back" onPress={actions.back} />
       </Box>
@@ -87,6 +87,20 @@ export function drawFindingPane(parts: Parts, data: FindingData, actions: Findin
         <Text bold>Why it matters</Text>
         <Text>{finding.why}</Text>
       </Box>
+
+      {finding.scenario !== '' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>What goes wrong</Text>
+          <Text>{finding.scenario}</Text>
+        </Box>
+      )}
+
+      {finding.evidence !== '' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Code read</Text>
+          <Text color="cyan">{finding.evidence}</Text>
+        </Box>
+      )}
 
       {(finding.replies ?? []).length > 0 && (
         <Box flexDirection="column" marginTop={1}>

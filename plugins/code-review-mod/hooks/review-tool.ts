@@ -1,12 +1,13 @@
 import type { Finding, FindingStatus, Group, Mode, Outcome, Reply, Review, ReviewInput } from '../types'
 
-import { SCORE_SCALE, TOOL_NAME } from './config'
+import { TOOL_NAME } from './config'
 import { isInDiff } from './diff-lines'
 import { hasPr, readMyComments, splitPr } from './github'
 import { pickMode, readPr } from './mode'
 import { GROUP_LABELS } from './order'
 import { OUTCOME_LABELS, applyOutcome, checkLine, replyLine, toCheck } from './recheck'
 import { changeReview, findingOf } from './ports'
+import { levelText } from './ui/rows'
 import type { Ports } from './ports'
 import { currentRound, editFinding, newReview, nextRound, readFinding, removeFinding, setStatus, skipGroup } from './review'
 
@@ -27,8 +28,14 @@ export const TOOL_SPEC = {
       mode: { type: 'string', enum: ['mine', 'theirs'], description: 'For "start": "theirs" for a PR link, "mine" for the user\'s own branch.' },
       head: { type: 'string', description: 'For "start": the full hash of the commit reviewed.' },
       group: { type: 'string', enum: ['standards', 'spec'], description: 'For "add", "edit" and "skipped".' },
-      weight: { type: 'string', enum: ['must', 'maybe'], description: 'For "add" and "edit": "must" for a broken written rule, "maybe" for a judgement call.' },
-      score: { type: 'integer', minimum: 1, maximum: 10, description: 'For "add" and "edit": 9-10 bug or broken spec, 6-8 fix before merge, 3-5 nice to have, 1-2 nitpick.' },
+      level: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'xhigh'],
+        description: 'For "add" and "edit": the first level in the rule whose description fits. "high" and "xhigh" need scenario, evidence and confidence.',
+      },
+      confidence: { type: 'string', enum: ['confirmed', 'likely'], description: 'For "add" and "edit": "confirmed" when the scenario was traced through the code, "likely" when it can\'t be from the repo alone.' },
+      scenario: { type: 'string', description: 'For "add" and "edit": what goes wrong, as the inputs and state and the wrong result.' },
+      evidence: { type: 'string', description: 'For "add" and "edit": the code read to check it, as file:line ranges.' },
       file: { type: 'string', description: 'For "add" and "edit": the file, relative to the repo root.' },
       line: { type: 'integer', minimum: 1, description: 'For "add" and "edit": the line in the new code.' },
       title: { type: 'string', description: 'For "add" and "edit": a short title.' },
@@ -76,7 +83,7 @@ function recheckAnswer(review: Review): string {
 
   const comment = review.mode === 'theirs' ? ', each with a short, polite "comment" asked as a question' : ''
 
-  return `Round ${round} of ${review.pr} started. ${todo} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add" (score: ${SCORE_SCALE}${comment}).`
+  return `Round ${round} of ${review.pr} started. ${todo} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add" (check each one first and pick its level as the rule says${comment}).`
 }
 
 /** A review of their PR rebuilt from your GitHub comments, its re-check round open at `head`. */
@@ -243,7 +250,7 @@ async function remove(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
 function list(review: Review): ToolAnswer {
   const lines = [...review.findings]
     .sort((a, b) => a.n - b.n)
-    .map(f => `#${f.n} ${GROUP_LABELS[f.group]} ${f.score === 0 ? '' : `${f.score}/10 `}${f.weight === 'must' ? 'must fix ' : ''}${f.file}:${f.line} "${f.title}" ${f.status}`)
+    .map(f => `#${f.n} ${GROUP_LABELS[f.group]} ${f.level === null ? '' : `${levelText(f)} `}${f.file}:${f.line} "${f.title}" ${f.status}`)
   const findings = lines.length === 0 ? 'No findings.' : `${lines.join('; ')}.`
 
   return { text: `${review.pr} (${review.mode === 'mine' ? 'your PR' : 'their PR'}), round ${currentRound(review)}: ${findings}` }

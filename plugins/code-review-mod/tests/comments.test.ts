@@ -29,7 +29,7 @@ test('only your thread-starting comments count; replies and other people\'s do n
     [1, 11, 'Comment 1?'],
     [2, 14, 'Comment 4?'],
   ])
-  expect(rebuilt?.findings[0]).toMatchObject({ group: 'comment', score: 0, status: 'posted', round: 1, draft: { text: 'Comment 1?\nMore words.', hasCode: false } })
+  expect(rebuilt?.findings[0]).toMatchObject({ group: 'comment', level: null, status: 'posted', round: 1, draft: { text: 'Comment 1?\nMore words.', hasCode: false } })
 })
 
 test('a comment on an outdated line keeps its first line number', () => {

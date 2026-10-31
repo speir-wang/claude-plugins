@@ -46,7 +46,7 @@ function blocks(review: Review): Block[] {
   }))
 }
 
-/** Draws the review: rounds, then the Standards and Spec sections, each sorted by score. */
+/** Draws the review: rounds, then the Standards and Spec sections, each sorted by level. */
 export function drawListPane({ Box, Text, Button }: Parts, data: ListData, actions: ListActions) {
   const { review, asking, notice, isReviewing, columns } = data
   if (review === null) {
