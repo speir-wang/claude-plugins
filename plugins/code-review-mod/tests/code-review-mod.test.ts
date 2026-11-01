@@ -108,11 +108,13 @@ async function review($: Engine, input: Record<string, unknown>) {
   return { text: String((ran as { result?: unknown }).result), isError: (ran as { isError?: boolean }).isError === true }
 }
 
+/** What "high" and "xhigh" need besides the finding. */
+const PROOF = { scenario: 'A 503 makes the loop retry forever.', evidence: 'src/app.ts:10-14', confidence: 'confirmed' }
+
 const FINDING = {
   action: 'add',
   group: 'standards',
-  weight: 'maybe',
-  score: 4,
+  level: 'medium',
   file: 'src/app.ts',
   line: 12,
   title: 'Name the magic number',
@@ -149,7 +151,8 @@ test('the code-review skill opens the panel and carries the rule', async ($, on)
 
   expect(prompted.text).toMatch(/^Review the branch\./)
   expect(prompted.text).toMatch(TOOL)
-  expect(prompted.text).toMatch('9-10 a bug or a broken spec')
+  expect(prompted.text).toMatch('"xhigh": wrong output, a crash')
+  expect(prompted.text).toMatch('Scope creep is a change')
   expect(prompted.text).toMatch('Only for the mattpocock-skills:code-review skill')
   expect(w.opened.map(o => o.id)).toEqual(['code-review-mod'])
 })
@@ -180,15 +183,15 @@ test('start, add and skipped each answer in one line, and the finding shows in t
   expect(await paneText($)).toMatch('Name the magic number')
 })
 
-test('a finding with a bad score, or before any start, is refused', async ($, on) => {
+test('a finding with a bad level, or before any start, is refused', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
   expect((await review($, FINDING)).isError).toBe(true)
   await review($, { action: 'start', pr: 'feature', head: HEAD })
-  const bad = await review($, { ...FINDING, score: 11 })
+  const bad = await review($, { ...FINDING, level: 11 })
   expect(bad.isError).toBe(true)
-  expect(bad.text).toMatch('score')
+  expect(bad.text).toMatch('"level" must be')
   expect((await review($, { action: 'nope' })).isError).toBe(true)
 })
 
@@ -215,11 +218,11 @@ test('review tool calls draw as one line in the chat', async ($, on) => {
   expect((await result.findAll({ type: 'Text' })).length).toBe(0)
 })
 
-test('the panel shows Standards then Spec, sorted by score, with a skipped Spec explained', async ($, on) => {
+test('the panel shows Standards then Spec, sorted by level, with a skipped Spec explained', async ($, on) => {
   world(on)
   await startMine($)
-  await review($, { ...FINDING, title: 'Low one', score: 2 })
-  await review($, { ...FINDING, title: 'High one', score: 8, weight: 'must', file: 'src/b.ts', line: 3 })
+  await review($, { ...FINDING, title: 'Low one', level: 'low' })
+  await review($, { ...FINDING, ...PROOF, title: 'High one', level: 'high', file: 'src/b.ts', line: 3 })
   await review($, { action: 'skipped', group: 'spec', reason: 'no spec found' })
 
   const text = await paneText($)
@@ -227,9 +230,9 @@ test('the panel shows Standards then Spec, sorted by score, with a skipped Spec 
   expect(text.indexOf('High one')).toBeLessThan(text.indexOf('Low one'))
   expect(text.indexOf('Low one')).toBeLessThan(text.indexOf('Spec'))
   expect(text).toMatch('skipped, no spec found')
-  expect(text).toMatch(/8\/10 must fix b\.ts:3  High one/)
-  expect(text).toMatch(/2\/10 +app\.ts:12  Low one/)
-  expect(text).not.toMatch('maybe')
+  expect(text).toMatch(/high +b\.ts:3  High one/)
+  expect(text).toMatch(/low +app\.ts:12  Low one/)
+  expect(text).not.toMatch('must fix')
   const drawn = await pane($)
   const low = (await drawn.findAll({ type: 'Button' })).find(b => String(b.props.label).includes('Low one'))
   expect(low?.props.dimColor).toBe(true)
@@ -620,7 +623,7 @@ test('Re-check on your PR: the button asks Claude, start lists what to check, ou
 
   expect((await review($, { action: 'outcome', number: 2, outcome: 'addressed' })).isError).toBe(true)
   expect((await review($, { action: 'outcome', number: 1, outcome: 'wrong', note: 'Still a bare number' })).isError).toBe(false)
-  await review($, { ...FINDING, title: 'A regression', score: 9, weight: 'must' })
+  await review($, { ...FINDING, ...PROOF, title: 'A regression', level: 'xhigh' })
 
   const shown = (await texts(drawn)).join('\n')
   expect(shown).toMatch('Round 1 · 2 found')
@@ -681,7 +684,7 @@ test('in a new session, starting their PR rebuilds the list from your GitHub com
   expect(started.text).toMatch('#2 src/b.ts:4 Is this check needed?. Read')
   expect(started.text).toMatch('Read the replies and the PR conversation before you record an outcome')
   expect(started.text).toMatch(`${OLD}..HEAD`)
-  expect(started.text).toMatch('9-10 a bug or a broken spec')
+  expect(started.text).toMatch('pick its level as the rule says')
   expect(started.text).toMatch('"comment"')
   expect(w.ran.some(l => l.includes('--paginate'))).toBe(true)
 
@@ -901,7 +904,7 @@ test('each button in a finding on their PR has its letter', async ($, on) => {
 test('when the review ends every row is numbered top to bottom, and "fix 3" means the third row', async ($, on) => {
   const w = world(on)
   await startMine($)
-  for (let i = 1; i <= 12; i++) await review($, { ...FINDING, group: i % 2 === 0 ? 'spec' : 'standards', score: (i % 10) + 1, title: `T${i}` })
+  for (let i = 1; i <= 12; i++) await review($, { ...FINDING, group: i % 2 === 0 ? 'spec' : 'standards', ...PROOF, level: (['low', 'medium', 'high', 'xhigh'] as const)[i % 4], title: `T${i}` })
   await $.turn.complete(turnEnd())
 
   const drawn = await pane($)
@@ -943,7 +946,7 @@ test('a row shows the file name only; the finding shows the full path', async ($
   const drawn = await pane($)
 
   const label = String((await drawn.find({ key: 'f-1' }))?.props.label)
-  expect(label).toMatch(/^#1 +4\/10 +review\.ts:75  Name the magic number$/)
+  expect(label).toMatch(/^#1 +medium +review\.ts:75  Name the magic number$/)
   await drawn.press({ key: 'f-1' })
   expect(await texts(drawn)).toContain('plugins/deep/hooks/review.ts:75')
 })
@@ -1111,8 +1114,8 @@ test('"remove 2" deletes the finding; the other numbers stay', async ($, on) => 
   world(on)
   await startMine($)
   await review($, FINDING)
-  await review($, { ...FINDING, title: 'Retry loop never stops', score: 9 })
-  await review($, { ...FINDING, title: 'Trailing comma', score: 2 })
+  await review($, { ...FINDING, ...PROOF, title: 'Retry loop never stops', level: 'xhigh' })
+  await review($, { ...FINDING, title: 'Trailing comma', level: 'low' })
 
   const removed = await review($, { action: 'remove', number: 2 })
   expect(removed).toEqual({ text: 'Removed #2: Retry loop never stops', isError: false })
@@ -1143,7 +1146,7 @@ test('a posted finding cannot be removed, edited or given another status', async
   await drawn.press({ key: 'submit' })
   await drawn.press({ key: 'post' })
 
-  for (const input of [{ action: 'remove', number: 1 }, { action: 'edit', number: 1, score: 2 }, { action: 'set-status', number: 1, status: 'open' }]) {
+  for (const input of [{ action: 'remove', number: 1 }, { action: 'edit', number: 1, level: 'low' }, { action: 'set-status', number: 1, status: 'open' }]) {
     const refused = await review($, input)
     expect(refused.isError).toBe(true)
     expect(refused.text).toBe('#1 is posted on GitHub. Change or delete the comment there.')
@@ -1157,18 +1160,18 @@ test('"edit" changes only the fields given, and refuses a bad value', async ($, 
   await review($, FINDING)
   await review($, { action: 'set-status', number: 1, status: 'queued' })
 
-  const edited = await review($, { action: 'edit', number: 1, score: 8, weight: 'must', title: 'Name the retry wait' })
+  const edited = await review($, { action: 'edit', number: 1, ...PROOF, level: 'high', title: 'Name the retry wait' })
   expect(edited).toEqual({ text: '#1 changed: Name the retry wait', isError: false })
   const shown = await paneText($)
-  expect(shown).toMatch('8/10 must fix app.ts:12  Name the retry wait')
+  expect(shown).toMatch(/high +app\.ts:12  Name the retry wait/)
   expect(shown).toMatch('in fix list')
 
-  const bad = await review($, { action: 'edit', number: 1, score: 0 })
+  const bad = await review($, { action: 'edit', number: 1, level: 'huge' })
   expect(bad.isError).toBe(true)
-  expect(bad.text).toMatch('score')
+  expect(bad.text).toMatch('"level" must be')
   expect((await review($, { action: 'edit', number: 1 })).text).toMatch('Nothing to change')
-  expect((await review($, { action: 'edit', number: 7, score: 3 })).isError).toBe(true)
-  expect(await paneText($)).toMatch('8/10')
+  expect((await review($, { action: 'edit', number: 7, level: 'low' })).isError).toBe(true)
+  expect(await paneText($)).toMatch(/high +app\.ts:12/)
 })
 
 test('"edit" on their PR changes the draft, and "comment" "" removes it', async ($, on) => {
@@ -1200,13 +1203,13 @@ test('"edit" on a PR refuses a new line outside the diff', async ($, on) => {
 test('"list" answers the numbers as the panel shows them after the review ends', async ($, on) => {
   world(on)
   await startMine($)
-  await review($, { ...FINDING, title: 'Low', score: 2 })
-  await review($, { ...FINDING, title: 'High', score: 9, weight: 'must' })
+  await review($, { ...FINDING, title: 'Low', level: 'low' })
+  await review($, { ...FINDING, ...PROOF, title: 'High', level: 'xhigh', confidence: 'likely' })
   await $.turn.complete(turnEnd())
 
   const listed = await review($, { action: 'list' })
   expect(listed.isError).toBe(false)
-  expect(listed.text).toBe('feature (your PR), round 1: #1 Standards 9/10 must fix src/app.ts:12 "High" open; #2 Standards 2/10 src/app.ts:12 "Low" open.')
+  expect(listed.text).toBe('feature (your PR), round 1: #1 Standards xhigh? src/app.ts:12 "High" open; #2 Standards low src/app.ts:12 "Low" open.')
 })
 
 test('"set-status" on their PR adds to the review and drops; fix list statuses are refused there', async ($, on) => {
@@ -1241,7 +1244,7 @@ test('remove, edit and list draw as one line in the chat', async ($, on) => {
 
   for (const [i, [input, line]] of ([
     [{ action: 'remove', number: 2 }, '#2 removed'],
-    [{ action: 'edit', number: 2, score: 3 }, '#2 edited'],
+    [{ action: 'edit', number: 2, level: 'low' }, '#2 edited'],
     [{ action: 'list' }, 'Findings listed'],
   ] as const).entries()) {
     const row = await $.ui.mount({ plugin: 'code-review-mod', surface: 'terminal', component: 'ToolUse', requestId: `r${i}`, props: { tool_use_id: `r${i}`, tool: TOOL, input, isRunning: false, isErrored: false, isInterrupted: false, output: 'x' } as never })
@@ -1253,7 +1256,7 @@ test('Delete in a finding asks once, then deletes it; Cancel keeps it', async ($
   world(on)
   await startMine($)
   await review($, FINDING)
-  await review($, { ...FINDING, title: 'Trailing comma', score: 2 })
+  await review($, { ...FINDING, title: 'Trailing comma', level: 'low' })
   const drawn = await pane($)
   await drawn.press({ key: 'f-1' })
 
@@ -1282,4 +1285,54 @@ test('a posted finding has no Delete button', async ($, on) => {
 
   await drawn.press({ key: 'f-1' })
   expect(await drawn.find({ key: 'delete' })).toBeUndefined()
+})
+
+test('"high" and "xhigh" need a scenario, evidence and confidence; "medium" does not', async ($, on) => {
+  world(on)
+  await startMine($)
+
+  for (const level of ['high', 'xhigh']) {
+    const bare = await review($, { ...FINDING, level })
+    expect(bare.isError).toBe(true)
+    expect(bare.text).toMatch('"medium" at most')
+    const unsure = await review($, { ...FINDING, ...PROOF, level, confidence: undefined })
+    expect(unsure.text).toMatch('needs "confidence"')
+  }
+  expect((await review($, FINDING)).isError).toBe(false)
+  expect((await review($, { ...FINDING, ...PROOF, level: 'xhigh' })).isError).toBe(false)
+
+  // An edit to "high" is checked the same way.
+  const raised = await review($, { action: 'edit', number: 1, level: 'high' })
+  expect(raised.isError).toBe(true)
+  expect(raised.text).toMatch('"medium" at most')
+})
+
+test('a finding shows what goes wrong and the code read; "likely" shows as not confirmed', async ($, on) => {
+  world(on)
+  await startMine($)
+  await review($, { ...FINDING, ...PROOF, level: 'xhigh', confidence: 'likely' })
+
+  const drawn = await pane($)
+  expect(String((await drawn.find({ key: 'f-1' }))?.props.label)).toMatch(/^#1 +xhigh\? +app\.ts:12/)
+  await drawn.press({ key: 'f-1' })
+  const shown = await texts(drawn)
+  expect(shown.join('\n')).toMatch('xhigh?  not confirmed')
+  expect(shown.indexOf('Why it matters')).toBeLessThan(shown.indexOf('What goes wrong'))
+  expect(shown).toContain('A 503 makes the loop retry forever.')
+  expect(shown).toContain('Code read')
+  expect(shown).toContain('src/app.ts:10-14')
+})
+
+test('a review saved with 1-10 scores comes back with levels', async ($, on) => {
+  const old = (n: number, score: number) => ({
+    n, round: 1, group: 'standards', weight: 'must', score, file: 'a.ts', line: n, title: `S${score}`, now: '', suggested: '', why: '', draft: null, status: 'open',
+  })
+  const saved = { savedAt: 1_000_000 - DAY, review: { pr: 'feature', mode: 'mine', rounds: [{ n: 1, head: HEAD }], findings: [old(1, 9), old(2, 6), old(3, 4), old(4, 2)], skipped: [] } }
+  world(on, { 'review:s1': saved })
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const listed = await review($, { action: 'list' })
+  expect(listed.text).toBe('feature (your PR), round 1: #1 Standards xhigh a.ts:1 "S9" open; #2 Standards high a.ts:2 "S6" open; #3 Standards medium a.ts:3 "S4" open; #4 Standards low a.ts:4 "S2" open.')
+  expect(await paneText($)).not.toMatch('must fix')
 })

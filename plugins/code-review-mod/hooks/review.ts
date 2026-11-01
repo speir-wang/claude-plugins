@@ -1,4 +1,4 @@
-import type { Finding, FindingStatus, Group, Mode, Review } from '../types'
+import type { Finding, FindingStatus, Group, Level, Mode, Review } from '../types'
 
 /** A new review with its first round. */
 export function newReview(pr: string, mode: Mode, head: string): Review {
@@ -17,20 +17,36 @@ export function nextRound(review: Review, head: string): Review {
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
+const LEVEL_NAMES: Level[] = ['low', 'medium', 'high', 'xhigh']
+
+/** How each level sorts: higher first. A finding with no level sorts last. */
+export function levelRank(level: Level | null): number {
+  return level === null ? 0 : LEVEL_NAMES.indexOf(level) + 1
+}
+
 /** Reads one finding from the tool's input; a sentence naming what is wrong when it can't. */
 export function readFinding(input: Record<string, unknown>, review: Review): Finding | string {
-  const { group, weight, score, line } = input
+  const { group, level, confidence, line } = input
   if (group !== 'standards' && group !== 'spec') {
     return '"group" must be "standards" or "spec".'
   }
-  if (weight !== 'must' && weight !== 'maybe') {
-    return '"weight" must be "must" or "maybe".'
-  }
-  if (typeof score !== 'number' || !Number.isInteger(score) || score < 1 || score > 10) {
-    return '"score" must be a whole number from 1 to 10.'
+  if (!LEVEL_NAMES.includes(level as Level)) {
+    return '"level" must be "low", "medium", "high" or "xhigh".'
   }
   if (text(input.file).trim() === '' || text(input.title).trim() === '') {
     return '"file" and "title" are needed.'
+  }
+  const scenario = text(input.scenario).trim()
+  const evidence = text(input.evidence).trim()
+  const isHigh = level === 'high' || level === 'xhigh'
+  if (isHigh && (scenario === '' || evidence === '')) {
+    return `"${String(level)}" needs "scenario" (what goes wrong) and "evidence" (the code you read, as file:line ranges). Without them the level is "medium" at most.`
+  }
+  if (isHigh && confidence !== 'confirmed' && confidence !== 'likely') {
+    return `"${String(level)}" needs "confidence": "confirmed" or "likely".`
+  }
+  if (confidence !== undefined && confidence !== 'confirmed' && confidence !== 'likely') {
+    return '"confidence" must be "confirmed" or "likely".'
   }
   const comment = text(input.comment).trim()
 
@@ -38,21 +54,23 @@ export function readFinding(input: Record<string, unknown>, review: Review): Fin
     n: review.findings.reduce((max, f) => Math.max(max, f.n), 0) + 1,
     round: currentRound(review),
     group,
-    weight,
-    score,
+    level: level as Level,
+    confidence: confidence === 'likely' ? 'likely' : 'confirmed',
     file: text(input.file).trim(),
     line: typeof line === 'number' && line > 0 ? Math.floor(line) : 1,
     title: text(input.title).trim(),
     now: text(input.now),
     suggested: text(input.suggested),
     why: text(input.why).trim(),
+    scenario,
+    evidence,
     draft: comment === '' ? null : { text: comment, hasCode: text(input.suggested).trim() !== '' },
     status: 'open',
   }
 }
 
 /** The fields "edit" may change. */
-export const EDITABLE = ['group', 'weight', 'score', 'file', 'line', 'title', 'now', 'suggested', 'why', 'comment'] as const
+export const EDITABLE = ['group', 'level', 'confidence', 'file', 'line', 'title', 'now', 'suggested', 'why', 'scenario', 'evidence', 'comment'] as const
 
 /**
  * One finding with the fields given in `input` changed, checked the same way
@@ -67,14 +85,16 @@ export function editFinding(input: Record<string, unknown>, finding: Finding, re
   }
   const merged = {
     group: finding.group,
-    weight: finding.weight,
-    score: finding.score,
+    level: finding.level,
+    confidence: finding.confidence,
     file: finding.file,
     line: finding.line,
     title: finding.title,
     now: finding.now,
     suggested: finding.suggested,
     why: finding.why,
+    scenario: finding.scenario,
+    evidence: finding.evidence,
     comment: finding.draft?.text ?? '',
     ...Object.fromEntries(given.map(key => [key, input[key]])),
   }
@@ -85,6 +105,24 @@ export function editFinding(input: Record<string, unknown>, finding: Finding, re
   const isDraftChanged = given.includes('comment') || given.includes('suggested')
 
   return { ...finding, ...read, n: finding.n, round: finding.round, status: finding.status, draft: isDraftChanged ? read.draft : finding.draft }
+}
+
+/** The level an old 1-10 score maps to: 9-10 xhigh, 6-8 high, 3-5 medium, 1-2 low, 0 none. */
+function levelOfScore(score: number): Level | null {
+  return score >= 9 ? 'xhigh' : score >= 6 ? 'high' : score >= 3 ? 'medium' : score >= 1 ? 'low' : null
+}
+
+/** A review saved before levels (v1.2.0 and older): each score becomes a level, and the must/maybe marker goes. */
+export function upgradeReview(review: Review): Review {
+  const findings = review.findings.map(f => {
+    if ('level' in f) {
+      return f
+    }
+    const { score, weight: _weight, ...rest } = f as Omit<Finding, 'level' | 'confidence' | 'scenario' | 'evidence'> & { score?: number; weight?: string }
+    return { ...rest, level: levelOfScore(score ?? 0), confidence: 'confirmed' as const, scenario: '', evidence: '' }
+  })
+
+  return { ...review, findings }
 }
 
 /** Marks a group as not run this round; a later call for the same group replaces the reason. */

@@ -31,6 +31,7 @@ import {
 import { KEEP_MS, PANE, PANE_TITLE, RULE, SAVED, TOOL, recheckNote } from './config'
 import { prLinks } from './mode'
 import type { Ports } from './ports'
+import { upgradeReview } from './review'
 import { TOOL_SPEC, runTool } from './review-tool'
 import { drawConfirmPane } from './ui/confirm-pane'
 import { drawFindingPane } from './ui/finding-pane'
@@ -110,8 +111,9 @@ async function restore($: $) {
     if (!isSaved(saved) || now - saved.savedAt > KEEP_MS) {
       await $.store.delete(key)
     } else if (key === `${SAVED}${id}` && (await read($, review)) === null) {
-      await update($, review, () => saved.review)
-      await update($, incoming, () => saved.incoming ?? null)
+      // A review saved before levels gets its scores turned into levels.
+      await update($, review, () => (saved.review === null ? null : upgradeReview(saved.review)))
+      await update($, incoming, () => (saved.incoming == null ? null : { ...saved.incoming, review: upgradeReview(saved.incoming.review) }))
       await ports($).openPane()
     }
   }

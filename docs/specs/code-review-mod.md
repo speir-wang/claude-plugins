@@ -17,8 +17,8 @@ Status: ready for work · Written: 2026-10-03 · Plugin: code-review-mod (new)
 A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds a panel that holds one review for one PR, for the length of one Claude Code session.
 
 - When the code-review skill runs, the panel opens on its own. Claude records each finding in it, not in a long chat message. The chat gets only the skill's one-line summary.
-- Findings sit in two groups, **Standards** and **Spec**, never mixed. Inside each group they are sorted by a **1–10 score** for how much they're worth fixing. Each one is shown as a score out of 10, plus **must fix** when it breaks a written rule or the spec.
-- Opening a finding shows the score, the file and line, the code now, the suggested code, and why it matters.
+- Findings sit in two groups, **Standards** and **Spec**, never mixed. Inside each group they are sorted by **level**: xhigh, high, medium, low. Each level has a written description, and Claude picks the first one that fits.
+- Opening a finding shows the level, the file and line, the code now, the suggested code, and why it matters.
 - **Mode** depends on how the review started. A PR link means it's someone else's PR. No link, on your own branch, means it's yours. You can flip the mode in the panel.
   - **Your PR:** each finding can go on a fix list, be skipped as won't fix, or be asked about. **Fix all** then fixes the whole list in one commit.
   - **Their PR:** each finding carries a comment draft. That draft is exactly what goes on GitHub. You add drafts to a pending review, then submit them all at once as one GitHub review.
@@ -43,12 +43,12 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 ### Reading findings
 
 11. As a developer, I want findings in two groups, Standards and Spec, so that one kind of problem never hides the other.
-12. As a developer, I want each finding to have a 1–10 score, so that I can tell at a glance how much it's worth fixing.
-13. As a developer, I want the score to mean the same thing every time (9–10 a bug or broken spec, 6–8 fix before merge, 3–5 nice to have, 1–2 nitpick), so that I can trust it.
-14. As a developer, I want findings sorted by score inside each group, so that the most important ones come first.
-15. As a developer, I want findings scored 1–2 greyed out but still shown, so that nothing is hidden while my idea of "worth it" keeps changing.
-16. As a developer, I want each finding marked "must fix" (a broken written rule) or "maybe" (a judgement call), so that a code smell doesn't look as urgent as a broken rule.
-17. As a developer, I want each row to show its score, marker, file and line, and a short title, so that I can scan the list without opening anything.
+12. As a developer, I want each finding to have a level (low, medium, high, xhigh), so that I can tell at a glance how much it's worth fixing.
+13. As a developer, I want each level to have a written description of what goes in it, so that the same finding gets the same level every time.
+14. As a developer, I want findings sorted by level inside each group, so that the most important ones come first.
+15. As a developer, I want low findings greyed out but still shown, so that nothing is hidden while my idea of "worth it" keeps changing.
+16. As a developer, I want Claude to check a finding against the code before it records it, and to show what goes wrong and the code it read for high and xhigh, so that a high level doesn't drop when I dig deeper.
+17. As a developer, I want each row to show its level, file and line, and a short title, so that I can scan the list without opening anything.
 18. As a developer, I want a finding's detail to show the code as it is now, with diff colours, so that I don't have to ask Claude for it.
 19. As a developer, I want a finding's detail to show the suggested code, so that I can judge whether the fix is worth it.
 20. As a developer, I want a "Why it matters" section written for me, explaining why this was picked, so that I understand the problem before I decide.
@@ -73,7 +73,7 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 
 34. As a reviewer, I want each finding to come with a comment draft, so that I don't write comments from scratch.
 35. As a reviewer, I want the draft to be short, polite and asked as a question, with suggested code when there is some, so that comments are easy for the author to accept.
-36. As a reviewer, I want the draft to leave out the score and the Standards/Spec label, so that the author sees only what helps them.
+36. As a reviewer, I want the draft to leave out the level and the Standards/Spec label, so that the author sees only what helps them.
 37. As a reviewer, I want the draft I see to be exactly what gets posted, so that nothing changes behind my back.
 38. As a reviewer, I want the draft shown under "Why it matters", in its own block, so that I can tell my explanation apart from the author's comment.
 39. As a reviewer, I want "Add to review" to put a draft in a pending pile and not post it, so that I can build up a review before anything goes public.
@@ -99,7 +99,7 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 56. As a developer, I want findings I dropped or marked won't fix left out of the re-check, so that I'm not asked about them again.
 57. As a developer, I want every commit since the last review fully reviewed, so that regressions in other areas are caught too.
 58. As a developer, I want new problems from a re-check listed separately from the old findings, so that I can tell old from new.
-59. As a reviewer, I want new problems on their PR to get scores and comment drafts, and go through the same pending/submit flow, so that regressions are easy to raise.
+59. As a reviewer, I want new problems on their PR to get levels and comment drafts, and go through the same pending/submit flow, so that regressions are easy to raise.
 60. As a developer, I want the top of the panel to show rounds (round 1 with its findings, round 2 with its ✅/⚠️/❌ counts and new problems), so that I can see progress across re-checks.
 
 ### Next step
@@ -129,7 +129,7 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 **The mod's own tool.** One tool that Claude calls, with actions:
 
 - `start`: the PR (`owner/repo#number`, or the branch name when there's no PR), the mode, and the head commit reviewed.
-- `add`: one finding. Its group (Standards/Spec), must fix or maybe, score, file, line, short title, code now, suggested code, why it matters, and on their PR the comment draft.
+- `add`: one finding. Its group (Standards/Spec), level, file, line, short title, code now, suggested code, why it matters, what goes wrong (scenario), the code read (evidence), confidence (confirmed or likely), and on their PR the comment draft.
 - `skipped`: a group that didn't run, with the reason (for example, no spec).
 - `outcome`: a re-check result for one finding (addressed / addressed wrongly / not addressed).
 - `set-status`: the status of one finding. Only the statuses of the review's mode: open, queued, fixing, fixed, won't fix on yours; open, pending, dropped on theirs. Posted is set only by Submit review.
@@ -139,13 +139,24 @@ A new mod, `code-review-mod`, in this marketplace, next to todo-commits. It adds
 
 A finding posted on GitHub can't be edited, removed or given another status: GitHub holds it.
 
-Each call answers in one line. Its rows in the chat shrink to one line, like the todo tool's rows. Claude writes the score, both code blocks, the explanation and the draft when it records a finding, after the skill's sub-agents report back. The mod never reads inside the sub-agents.
+Each call answers in one line. Its rows in the chat shrink to one line, like the todo tool's rows. Claude writes the level, both code blocks, the explanation and the draft when it records a finding, after the skill's sub-agents report back. The mod never reads inside the sub-agents.
 
-**Score scale.** 9–10 a bug or broken spec · 6–8 fix before merging · 3–5 nice to have · 1–2 nitpick. This scale goes into the rule, so every score means the same thing. Sorting happens only inside a group, never across groups. The skill keeps the two groups apart on purpose.
+**Levels.** Claude picks the first level that fits, from the top:
+
+| Level | What goes in it | Example |
+|---|---|---|
+| **xhigh** | Wrong output, a crash, data loss or a security hole on a path normal use reaches; or a spec requirement that isn't met | The retry loop never stops when the server returns 503 |
+| **high** | A written rule (AGENTS.md, CLAUDE.md, a style guide) is broken; a bug that needs unusual input or state; or scope creep: a change whose effect reaches past what the PR is about, which the PR doesn't mention | A PR about the login form changes a shared `Button` default |
+| **medium** | Nothing goes wrong now, but the code is harder to read, change or test | The same date parsing copied in three files |
+| **low** | Style, formatting, or a preference no written rule backs | Trailing commas, import order |
+
+Scope creep is a change to something used outside the PR's area (shared components and utilities, lint, tsconfig, build or CI config, environment defaults, dependency versions, database schema, anything imported from many places) that the PR title, description and commit messages don't mention. If it breaks something in normal use, it's xhigh.
+
+Before recording a finding, Claude reads its code, callers and tests and tries to show it is wrong. High and xhigh need a scenario and evidence; the tool refuses them otherwise. Confidence is kept apart from level: "likely" shows as a ? after the level. These go into the rule, so every level means the same thing. There is no must fix / maybe marker: a broken written rule is part of high. Sorting happens only inside a group, never across groups. The skill keeps the two groups apart on purpose.
 
 **Mode.** Set by the `start` action: a PR link means theirs; no link, on your own branch, means yours. A switch in the panel flips it.
 
-**Comment drafts.** Short, polite, asked as a question, with suggested code when there is some. No score, no group label. The panel shows the exact text that will be posted. Edit changes it directly. Rewrite sends Claude the draft plus your note and replaces the draft with Claude's answer.
+**Comment drafts.** Short, polite, asked as a question, with suggested code when there is some. No level, no group label. The panel shows the exact text that will be posted. Edit changes it directly. Rewrite sends Claude the draft plus your note and replaces the draft with Claude's answer.
 
 **Posting.** Pending drafts are held in the session, not on GitHub. "Submit review" asks you to confirm and pick Comment / Request changes / Approve (Comment by default). Then it posts one GitHub review with each comment on its line, through `gh`.
 
@@ -160,7 +171,7 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
 **UI.** Only the panel. No status line entry, no band, no toast.
 
 - **Top row:** PR, mode switch, counts, pending/submit, rounds.
-- **Body:** two groups, rows sorted by score, 1–2 greyed out.
+- **Body:** two groups, rows sorted by level, low greyed out.
 - **Detail view:** ← Back and Esc, like todo-commits.
 - **Bottom:** a tip line that changes with the mode.
 - **Next step:** Approve PR / Create PR, shown when nothing is left. Each asks you to confirm.
@@ -185,7 +196,7 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
   - The re-check outcome per finding, plus the list of new problems.
   - Rebuilding findings from GitHub comments: thread starters vs replies, resolved threads, the starting commit.
   - The mode: link vs no link, flipped by hand.
-  - Sort order: by score inside each group, 1–2 greyed out, groups never mixed.
+  - Sort order: by level inside each group, low greyed out, groups never mixed.
 - **No other inside tests,** so moving code around rarely breaks a test.
 - Run `claude plugin validate` and `claude plugin test` on the mod.
 
@@ -196,7 +207,7 @@ Each call answers in one line. Its rows in the chat shrink to one line, like the
 - Any review history across sessions, or a list of past PRs.
 - A status line entry, band or toast.
 - Showing two panels side by side. Claude Code shows one panel at a time, with the rest as tabs.
-- Hiding findings below a score.
+- Hiding findings below a level.
 - The grill-me panel from the same ideas doc. That's a separate plugin.
 
 ## Further Notes
