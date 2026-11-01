@@ -1,4 +1,4 @@
-import type { Finding, Reply } from '../types'
+import type { Finding, Reply, Said } from '../types'
 
 type GitHubUser = { login: string; type?: string } | null
 
@@ -48,7 +48,7 @@ function repliesTo(start: GitHubComment, comments: GitHubComment[], me: string):
 }
 
 /** The PR conversation: its comments and the review bodies, from people (bots left out), oldest first. */
-function discussionOf(conversation: GitHubIssueComment[], reviews: GitHubReview[], me: string): Reply[] {
+export function discussionOf(conversation: GitHubIssueComment[], reviews: GitHubReview[], me: string): Reply[] {
   const said = [
     ...conversation.map(c => ({ user: c.user, body: c.body, at: c.created_at })),
     ...reviews.filter(r => r.submitted_at !== null).map(r => ({ user: r.user, body: r.body ?? '', at: r.submitted_at ?? '' })),
@@ -104,4 +104,37 @@ export function rebuild(
   )
 
   return { findings, base, discussion: discussionOf(conversation, reviews, me) }
+}
+
+/**
+ * The threads other people (bots included) started on the PR's lines, each
+ * with every reply on it, oldest first. Your own threads are left out: the
+ * rebuilt findings hold them.
+ */
+export function othersThreads(comments: GitHubComment[], me: string): Said[] {
+  return comments
+    .filter(c => c.user !== null && c.user.login !== me && c.in_reply_to_id === undefined)
+    .sort((a, b) => a.id - b.id)
+    .map(c => ({ author: c.user?.login ?? '', body: c.body.trim(), file: c.path, line: c.line ?? c.original_line ?? 1, replies: repliesTo(c, comments, me) }))
+}
+
+/** How long one comment may be when listed for Claude; a bot's can run to pages. */
+const SAID_MAX = 400
+
+function clip(body: string): string {
+  const flat = body.replace(/\s+/g, ' ').trim()
+
+  return flat.length > SAID_MAX ? `${flat.slice(0, SAID_MAX - 1)}…` : flat
+}
+
+/** One thread as Claude reads it, on one line. */
+export function saidLine(said: Said): string {
+  const replies = said.replies.map(r => `${r.isMine === true ? 'you' : r.author} replied: "${clip(r.body)}"`)
+
+  return [`${said.author} on ${said.file}:${said.line}: "${clip(said.body)}"`, ...replies].join(' — ')
+}
+
+/** The threads others started within `near` lines of a line. */
+export function threadsNear(others: Said[], file: string, line: number, near = 3): Said[] {
+  return others.filter(s => s.file === file && Math.abs(s.line - line) <= near)
 }
