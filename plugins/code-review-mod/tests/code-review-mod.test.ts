@@ -750,6 +750,52 @@ test('with no comments of yours on GitHub, their PR starts as a first review', a
   expect(started.text).toMatch('Review of acme/shop#7 started')
 })
 
+test('a first review of their PR lists what other people already commented, and not to repeat it', async ($, on) => {
+  const w = world(on)
+  const line = (o: unknown) => JSON.stringify(o)
+  w.answers['gh api user'] = 'me\n'
+  w.answers['gh api repos/acme/shop/pulls/7/comments'] = [
+    line({ id: 1, user: { login: 'bob' }, path: 'src/app.ts', line: 11, body: 'Magic number: name 3000?' }),
+    line({ id: 2, user: { login: 'author' }, in_reply_to_id: 1, path: 'src/app.ts', line: 11, body: 'Will do.' }),
+    line({ id: 3, user: { login: 'copilot', type: 'Bot' }, path: 'src/b.ts', line: 40, body: 'Possible null here.' }),
+  ].join('\n')
+  w.answers['gh api repos/acme/shop/pulls/7/reviews'] = ''
+  w.answers['gh api repos/acme/shop/issues/7/comments'] = line({ user: { login: 'carol' }, body: 'Docs need updating too.', created_at: '2026-10-02T10:00:00Z' })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+
+  expect(started.text).toMatch('Review of acme/shop#7 started')
+  expect(started.text).toMatch('bob on src/app.ts:11: "Magic number: name 3000?" — author replied: "Will do."')
+  expect(started.text).toMatch('copilot on src/b.ts:40: "Possible null here."')
+  expect(started.text).toMatch('PR conversation, oldest first: carol said: "Docs need updating too."')
+  expect(started.text).toMatch("don't record one that makes a point already made")
+
+  // A finding near bob's line is recorded, with a note to remove it if it repeats him.
+  const near = await review($, THEIRS)
+  expect(near.isError).toBe(false)
+  expect(near.text).toMatch('Already commented near it: bob on src/app.ts:11')
+  expect(near.text).toMatch('call "remove" with number 1')
+
+  const far = await review($, { ...THEIRS, file: 'src/c.ts', line: 3 })
+  expect(far.text).not.toMatch('Already commented')
+})
+
+test('a re-check of their PR lists other people\'s comments next to your own', async ($, on) => {
+  const w = world(on)
+  fakeGitHub(w)
+  const line = (o: unknown) => JSON.stringify(o)
+  w.answers['gh api repos/acme/shop/pulls/7/comments'] += `\n${line({ id: 9, user: { login: 'bob' }, path: 'src/c.ts', line: 2, body: 'Typo in the name.' })}`
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const started = await review($, { action: 'start', pr: 'acme/shop#7', head: HEAD })
+
+  expect(started.text).toMatch('Round 2')
+  expect(started.text).toMatch('bob on src/c.ts:2: "Typo in the name."')
+  // Only your own threads become findings.
+  expect(started.text).not.toMatch('#3 ')
+})
+
 test('on their PR a re-check in the same session also rebuilds from GitHub', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })

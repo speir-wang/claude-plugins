@@ -49,6 +49,8 @@ You can also just say *"fix 3"*. Then press **N queued · Fix all**. After you c
 
 Run the review with a PR link. Each finding comes with a comment draft for the author. The draft you see is exactly what gets posted.
 
+Claude reads what is already on the PR before it records anything: the comment threads other people started on its lines (bots such as Copilot included), with their replies, and the PR conversation. A finding that repeats a point already made is not recorded. A finding within 3 lines of someone else's thread gets a second look, and is removed if it says the same thing.
+
 | Button | Key | What it does |
 |---|---|---|
 | Add to review | `p` | Puts the draft in the pending pile. Nothing is posted yet |

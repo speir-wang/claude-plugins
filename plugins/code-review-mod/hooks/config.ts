@@ -47,6 +47,7 @@ export const RULE = [
   `- ${SCOPE_CREEP}`,
   '- "scenario": what goes wrong, as the inputs and state and the wrong result. "evidence": the code you read to check it, as file:line ranges. Both are needed for "high" and "xhigh"; if you can\'t give them, the level is "medium" at most, or check again.',
   '- "confidence": "confirmed" when you traced the scenario through the code, "likely" when it can\'t be traced from the repo alone (for example it depends on runtime config). Needed for "high" and "xhigh".',
+  '- On a PR that is not the user\'s ("theirs"), the "start" answer lists what other people already commented. Don\'t record a finding that repeats one of those points, even in other words. When "add" answers that someone already commented near the line and it is the same point, "remove" it.',
   '- On a PR that is not the user\'s ("theirs"), also give "comment": the comment to post for the author. Short, polite, asked as a question. No level and no Standards/Spec label. Leave out the code: the panel adds the suggested code below it.',
   `- When a group did not run, call ${TOOL} "skipped" with the group and the reason (for example "no spec found").`,
   '- In the chat, write only the skill\'s one-line summary: the count and the worst finding per group. Do not repeat the findings.',

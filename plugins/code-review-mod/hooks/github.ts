@@ -1,6 +1,6 @@
-import type { Finding, Reply, ReviewEvent } from '../types'
+import type { Finding, Reply, ReviewEvent, Said } from '../types'
 
-import { rebuild } from './comments'
+import { discussionOf, othersThreads, rebuild } from './comments'
 import type { GitHubComment, GitHubIssueComment, GitHubReview } from './comments'
 import { draftBody } from './draft'
 import type { Ports } from './ports'
@@ -59,28 +59,34 @@ export function jsonLines<T>(text: string): T[] {
 }
 
 /**
- * Rebuilds a review of their PR from your own comments on GitHub, for a
- * re-check in any session, with the PR conversation. Nothing when gh can't
- * tell who you are or you have no comments there.
+ * Reads what is on their PR so far. `rebuilt`: the review rebuilt from your own
+ * comments, for a re-check in any session; nothing when you have none or gh
+ * can't tell who you are. `others`: the threads other people started on its
+ * lines. `discussion`: the PR conversation. Nothing when `pr` is not a PR.
  */
-export async function readMyComments(p: Run, pr: string): Promise<{ findings: Finding[]; base: string; discussion: Reply[] } | null> {
+export async function readPrComments(
+  p: Run,
+  pr: string,
+): Promise<{ rebuilt: { findings: Finding[]; base: string; discussion: Reply[] } | null; others: Said[]; discussion: Reply[] } | null> {
   const place = splitPr(pr)
-  const me = (await p.run(['gh', 'api', 'user', '--jq', '.login'])).stdout.trim()
-  if (place === undefined || me === '') {
+  if (place === undefined) {
     return null
   }
+  const me = (await p.run(['gh', 'api', 'user', '--jq', '.login'])).stdout.trim()
   const list = async (path: string) => {
     const ran = await p.run(['gh', 'api', `repos/${place.repo}/${path}`, '--paginate', '--jq', '.[] | @json'])
     return ran.exitCode === 0 ? ran.stdout : ''
   }
+  const comments = jsonLines<GitHubComment>(await list(`pulls/${place.number}/comments`))
+  const reviews = jsonLines<GitHubReview>(await list(`pulls/${place.number}/reviews`))
+  // The PR conversation lives on the issue behind the PR.
+  const conversation = jsonLines<GitHubIssueComment>(await list(`issues/${place.number}/comments`))
 
-  return rebuild(
-    jsonLines<GitHubComment>(await list(`pulls/${place.number}/comments`)),
-    jsonLines<GitHubReview>(await list(`pulls/${place.number}/reviews`)),
-    me,
-    // The PR conversation lives on the issue behind the PR.
-    jsonLines<GitHubIssueComment>(await list(`issues/${place.number}/comments`)),
-  )
+  return {
+    rebuilt: me === '' ? null : rebuild(comments, reviews, me, conversation),
+    others: othersThreads(comments, me),
+    discussion: discussionOf(conversation, reviews, me),
+  }
 }
 
 /** Whether the branch already has a PR on GitHub; false when gh can't tell. */

@@ -1,8 +1,9 @@
-import type { Finding, FindingStatus, Group, Mode, Outcome, Reply, Review, ReviewInput } from '../types'
+import type { Finding, FindingStatus, Group, Mode, Outcome, Reply, Review, ReviewInput, Said } from '../types'
 
 import { TOOL_NAME } from './config'
 import { isInDiff } from './diff-lines'
-import { hasPr, readMyComments, splitPr } from './github'
+import { saidLine, threadsNear } from './comments'
+import { hasPr, readPrComments, splitPr } from './github'
 import { pickMode, readPr } from './mode'
 import { GROUP_LABELS } from './order'
 import { OUTCOME_LABELS, applyOutcome, checkLine, replyLine, toCheck } from './recheck'
@@ -64,6 +65,25 @@ export type ToolPorts = Pick<Ports, 'review' | 'incoming' | 'view' | 'shouldFocu
 
 const fail = (text: string): ToolAnswer => ({ text, isError: true })
 
+/**
+ * What other people already said on their PR, and not to say it again. One
+ * line; '' when there is nothing. `withDiscussion` adds the PR conversation,
+ * which a re-check lists on its own.
+ */
+function alreadySaid(review: Review, withDiscussion: boolean): string {
+  const threads = (review.others ?? []).map(saidLine)
+  const talk = withDiscussion ? (review.discussion ?? []).filter(r => r.isMine !== true).map(r => replyLine(r, 'said')) : []
+  if (threads.length === 0 && talk.length === 0) {
+    return ''
+  }
+  const parts = [
+    threads.length === 0 ? '' : ` Other people's comments on its lines: ${threads.join('; ')}.`,
+    talk.length === 0 ? '' : ` PR conversation, oldest first: ${talk.join('; ')}.`,
+  ]
+
+  return `${parts.join('')} Check each finding against these before you record it: don't record one that makes a point already made, even in other words, or one the author already answered. If yours adds something new to it, record it and say in "comment" what it adds.`
+}
+
 /** What a new round tells Claude: the findings to check, and where to review from. One line. */
 function recheckAnswer(review: Review): string {
   const round = currentRound(review)
@@ -83,12 +103,12 @@ function recheckAnswer(review: Review): string {
 
   const comment = review.mode === 'theirs' ? ', each with a short, polite "comment" asked as a question' : ''
 
-  return `Round ${round} of ${review.pr} started. ${todo} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add" (check each one first and pick its level as the rule says${comment}).`
+  return `Round ${round} of ${review.pr} started. ${todo}${alreadySaid(review, false)} Then review every commit since ${since.slice(0, 7)} (${since}..HEAD) and record new problems with "add" (check each one first and pick its level as the rule says${comment}).`
 }
 
 /** A review of their PR rebuilt from your GitHub comments, its re-check round open at `head`. */
-function fromComments(pr: string, head: string, rebuilt: { findings: Finding[]; base: string; discussion: Reply[] }): Review {
-  return { pr, mode: 'theirs', rounds: [{ n: 1, head: rebuilt.base }, { n: 2, head }], findings: rebuilt.findings, discussion: rebuilt.discussion, skipped: [] }
+function fromComments(pr: string, head: string, rebuilt: { findings: Finding[]; base: string; discussion: Reply[] }, others: Said[]): Review {
+  return { pr, mode: 'theirs', rounds: [{ n: 1, head: rebuilt.base }, { n: 2, head }], findings: rebuilt.findings, discussion: rebuilt.discussion, others, skipped: [] }
 }
 
 /** Adds the findings not posted yet (open, in the pile, dropped) after the rebuilt ones, so no draft is lost. */
@@ -119,25 +139,32 @@ async function start(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
       return { text: `Round ${currentRound(current)} of ${pr} is open. Record findings with "add".` }
     }
     // On their PR, GitHub holds what was posted: every re-check starts from it.
-    const rebuilt = current.mode === 'theirs' ? await readMyComments(p, pr) : null
-    if (rebuilt !== null) {
-      const fresh = keepUnposted(fromComments(pr, head, rebuilt), current)
+    const read = current.mode === 'theirs' ? await readPrComments(p, pr) : null
+    const rebuilt = read?.rebuilt ?? null
+    if (read !== null && rebuilt !== null) {
+      const fresh = keepUnposted(fromComments(pr, head, rebuilt, read.others), current)
       await p.review.update(() => fresh)
       await p.shouldFocus.update(() => true)
       return { text: recheckAnswer(fresh) }
     }
-    const next = await changeReview(p, review => nextRound(review, head))
+    // Comments others posted since the last round count too.
+    const next = await changeReview(p, review => ({ ...nextRound(review, head), ...(read === null ? {} : { others: read.others, discussion: read.discussion }) }))
     await p.shouldFocus.update(() => true)
     return next === null ? fail('No review is open.') : { text: recheckAnswer(next) }
   }
   const mode = pickMode(pr, input.mode)
   // Your earlier comments on their PR make this a re-check, in any session.
-  const rebuilt = mode === 'theirs' ? await readMyComments(p, pr) : null
+  const read = mode === 'theirs' ? await readPrComments(p, pr) : null
+  const rebuilt = read?.rebuilt ?? null
   // Your branch may already have a PR: then Create PR is not offered.
   const isBranch = mode === 'mine' && readPr(pr) === undefined
+  const seen = read === null ? {} : { others: read.others, discussion: read.discussion }
   const fresh: Review =
-    rebuilt === null ? { ...newReview(pr, mode, head), ...(isBranch ? { hasPr: await hasPr(p, pr) } : {}) } : fromComments(pr, head, rebuilt)
-  const opening = rebuilt === null ? `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).` : recheckAnswer(fresh)
+    rebuilt === null
+      ? { ...newReview(pr, mode, head), ...seen, ...(isBranch ? { hasPr: await hasPr(p, pr) } : {}) }
+      : fromComments(pr, head, rebuilt, read?.others ?? [])
+  const opening =
+    rebuilt === null ? `Review of ${pr} started (${mode === 'mine' ? 'your PR' : 'their PR'}).${alreadySaid(fresh, true)}` : recheckAnswer(fresh)
   if (current !== null && current.findings.length > 0) {
     // The panel asks before replacing; the review goes on either way.
     await p.incoming.update(() => ({ review: fresh, answer: 'ask' }))
@@ -289,6 +316,20 @@ async function outsideDiff(p: ToolPorts, review: Review, finding: Finding): Prom
 }
 
 /**
+ * On their PR, the threads others started near the finding's line, so Claude
+ * can tell whether it repeats one; '' when there are none. A note, not a
+ * refusal: a different problem on the same line is still worth a comment.
+ */
+function nearNote(review: Review, finding: Finding): string {
+  const near = threadsNear(review.others ?? [], finding.file, finding.line)
+  if (review.mode !== 'theirs' || near.length === 0) {
+    return ''
+  }
+
+  return `. Already commented near it: ${near.map(saidLine).join('; ')}. If #${finding.n} makes the same point, call "remove" with number ${finding.n}.`
+}
+
+/**
  * Records "add" and "skipped" into the review being built: the one waiting
  * for "Replace?" when there is one, else the one shown. Once the user chose
  * to keep the old one, the new review's findings are let go, but Claude is
@@ -318,7 +359,7 @@ async function record(p: ToolPorts, input: ReviewInput): Promise<ToolAnswer> {
       return fail(`Not added: ${outside}`)
     }
     await write(r => ({ ...r, findings: [...r.findings, finding] }))
-    return { text: `Added #${finding.n}: ${finding.title}` }
+    return { text: `Added #${finding.n}: ${finding.title}${nearNote(target, finding)}` }
   }
   const skip = readSkip(input)
   if (typeof skip === 'string') {

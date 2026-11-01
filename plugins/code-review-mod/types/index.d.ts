@@ -23,6 +23,9 @@ export type Outcome = 'addressed' | 'wrong' | 'missed'
 /** A comment on GitHub after the one a finding came from: on its thread, or in the PR conversation. `isMine` when you wrote it. */
 export type Reply = { author: string; body: string; isMine?: boolean }
 
+/** A comment thread someone else started on a line of their PR, with its replies. */
+export type Said = { author: string; body: string; file: string; line: number; replies: Reply[] }
+
 /** The comment to post on their PR: text, plus the suggested code when `hasCode`. */
 export type Draft = { text: string; hasCode: boolean }
 
@@ -72,6 +75,8 @@ export type Review = {
   findings: Finding[]
   /** On their PR: the comments in the PR conversation and the review bodies, oldest first. */
   discussion?: Reply[]
+  /** On their PR: the threads other people started on its lines, so a finding doesn't repeat one. */
+  others?: Said[]
   /** Groups that did not run, with why, by round. */
   skipped: { group: Group; reason: string; round: number }[]
 }
