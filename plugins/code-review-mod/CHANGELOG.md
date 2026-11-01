@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.2.0...code-review-mod-v1.3.0) (2026-11-01)
+
+
+### Features
+
+* **code-review-mod:** rate findings low, medium, high or xhigh ([42aea8c](https://github.com/speir-wang/claude-plugins/commit/42aea8ce55919e7a8f28a711f7ed65e9090a787d))
+* **code-review-mod:** rate findings low, medium, high or xhigh ([9166148](https://github.com/speir-wang/claude-plugins/commit/916614887707b7ddb12621254da099c86a059414))
+
 ## [1.2.0](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.1.2...code-review-mod-v1.2.0) (2026-10-31)
 
 
