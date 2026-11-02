@@ -162,20 +162,74 @@ test('a commit made right after the todo closed still goes to it', async ($, on)
   expect(await hashesOfTodo1($)).toEqual([B])
 })
 
-test('the commit rule is added only while the panel is open', async ($, on) => {
-  const repo = world(on)
-  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'hi', scope: 'shared' }] }))
-  const compose = () => $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] })
+/** Records the context each submitted prompt carried. */
+function contexts(on: On) {
+  const seen: (readonly string[] | undefined)[] = []
+  on('prompt.submit', ($, e) => {
+    seen.push(e.context)
+    return { text: e.text } as never
+  })
+  return seen
+}
 
-  expect((await compose()).sections.map(s => s.id)).toEqual(['intro'])
+test('each prompt carries the commit rule only while the panel is open', async ($, on) => {
+  const repo = world(on)
+  const seen = contexts(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  await $.prompt.submit({ text: 'hi' } as never)
   repo.opened.push('todo-commits')
-  const sections = (await compose()).sections
-  expect(sections.map(s => s.id)).toEqual(['intro', 'todo-commits:commit-rule'])
-  const rule = sections[1]!.text
+  await $.prompt.submit({ text: 'plan it' } as never)
+  repo.opened = []
+  await $.prompt.submit({ text: 'bye' } as never)
+
+  expect(seen[0]).toBeUndefined()
+  expect(seen[1]?.length).toBe(1)
+  const rule = seen[1]![0]!
   expect(rule).toMatch('mcp__todo-commits__todos')
   expect(rule).not.toMatch('TaskCreate')
   expect(rule).toMatch("Don't start the work until the user says to go ahead.")
+  expect(seen[2]).toBeUndefined()
 })
+
+test('the tool call that opens the panel mid-turn carries the commit rule; later ones do not', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const first = (await $.tool.call({ tool: 'TaskCreate', tool_use_id: 't1', subject: 'Change x', description: '' } as never)) as { context?: readonly string[] }
+  const second = (await $.tool.call({ tool: 'TaskCreate', tool_use_id: 't2', subject: 'Change y', description: '' } as never)) as { context?: readonly string[] }
+
+  expect(first.context?.join('\n') ?? '').toMatch('mcp__todo-commits__todos')
+  expect(second.context).toBeUndefined()
+})
+
+// Under Claude Enterprise, cc-plugin-sec-default sits in the org's outer tier and sends
+// prompt.compose past the user tier. The rule has to arrive without it.
+test(
+  'with prompt.compose skipping the user tier, the commit rule still arrives',
+  {
+    plugins: [
+      {
+        name: 'sec-default-stub',
+        tier: 'prepend',
+        register(on) {
+          on('prompt.compose', ($, e, next) => next.to(e, 'append'))
+        },
+      },
+    ],
+  },
+  async ($, on) => {
+    const repo = world(on)
+    const seen = contexts(on)
+    on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'hi', scope: 'shared' }] }))
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+    repo.opened.push('todo-commits')
+    await $.prompt.submit({ text: 'go' } as never)
+
+    expect(seen[0]?.join('\n') ?? '').toMatch('mcp__todo-commits__todos')
+  },
+)
 
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`clicking a hash shows its message and diff (${surface})`, async ($, on) => {

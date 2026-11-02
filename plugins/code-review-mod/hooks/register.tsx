@@ -28,7 +28,7 @@ import {
   toggleQueued,
   wontFix,
 } from './actions'
-import { KEEP_MS, PANE, PANE_TITLE, RULE, SAVED, TOOL, recheckNote } from './config'
+import { KEEP_MS, PANE, PANE_TITLE, RULE, SAVED, SKILL, TOOL, recheckNote } from './config'
 import { prLinks } from './mode'
 import type { Ports } from './ports'
 import { upgradeReview } from './review'
@@ -102,6 +102,12 @@ function ports($: $): Ports {
   }
 }
 
+/** The code-review skill started: the panel opens and shows "Reviewing…" until the turn ends. */
+async function startReviewing($: $) {
+  await update($, isReviewing, () => true)
+  await ports($).openPane()
+}
+
 /** Deletes saved reviews older than a week, and brings back this session's own after a resume. */
 async function restore($: $) {
   const now = await $.clock.now()
@@ -128,16 +134,23 @@ export const register: Register = on => {
     return started
   })
 
-  // The loader reads hook filters from this file only: keep this name written out, not SKILL from config.
-  on('skill.prompt', { skill: 'mattpocock-skills:code-review' }, async ($, e, next) => {
-    const prompted = await next(e)
-    await update($, isReviewing, () => true)
-    await ports($).openPane()
+  // Claude runs the skill through the Skill tool: open the panel and send the rule with the result.
+  // Not `skill.prompt` or `prompt.compose`: under Claude Enterprise the built-in
+  // cc-plugin-sec-default plugin skips user-installed plugins for those events.
+  on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
+    if (e.skill !== SKILL) {
+      return next(e)
+    }
+    await startReviewing($)
+    const ran = await next(e)
+    if (ran.deny !== undefined || ran.isError) {
+      return ran
+    }
 
-    return { text: `${prompted.text}\n\n${RULE}` }
+    return { ...ran, context: [...(ran.context ?? []), RULE] }
   })
 
-  // Written out for the loader, like the skill name above: this is TOOL.
+  // Written out for the loader: this is TOOL.
   on('tool.call', { tool: 'mcp__code-review-mod__review' }, async ($, e) => {
     const answer = await runTool(ports($), e as ReviewInput)
 
@@ -159,23 +172,25 @@ export const register: Register = on => {
     return done
   })
 
-  // A message with a PR link may ask for a re-check: tell Claude how, rule included.
+  // The rule rides on each prompt while a review exists, or when the user types the skill's command.
+  // A message with a PR link may ask for a re-check: tell Claude how.
   on('prompt.submit', async ($, e, next) => {
+    const notes: string[] = []
+    if (e.command?.name === SKILL) {
+      await startReviewing($)
+      notes.push(RULE)
+    } else if ((await read($, review)) !== null) {
+      notes.push(RULE)
+    }
     const prs = prLinks(e.text)
-    if (prs.length === 0) {
+    if (prs.length > 0) {
+      notes.push(recheckNote(prs))
+    }
+    if (notes.length === 0) {
       return next(e)
     }
 
-    return next({ ...e, context: [...(e.context ?? []), recheckNote(prs)] })
-  })
-
-  on('prompt.compose', async ($, e, next) => {
-    const composed = await next(e)
-    if ((await read($, review)) === null) {
-      return composed
-    }
-
-    return { sections: [...composed.sections, { id: 'code-review-mod:rule', text: RULE, scope: 'session' }] }
+    return next({ ...e, context: [...(e.context ?? []), ...notes] })
   })
 
   // /clear starts a new session: one review per session, so the panel starts empty.

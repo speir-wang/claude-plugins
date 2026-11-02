@@ -52,11 +52,21 @@ function ports($: $): Ports {
   }
 }
 
-/** Opens the todo pane the first time Claude makes a list. */
+/** Opens the todo pane the first time Claude makes a list; true when it opened it. */
 async function openIfNew(p: Pick<Ports, 'isPaneOpen' | 'openPane'>, hadTodos: boolean) {
   if (!hadTodos && !(await p.isPaneOpen())) {
     await p.openPane({ title: 'Todos' })
+    return true
   }
+  return false
+}
+
+/**
+ * A tool result that opened the pane mid-turn carries the commit rule, so
+ * Claude has it before the next prompt brings it.
+ */
+function withRule<R extends { context?: readonly string[] }>(ran: R, opened: boolean): R {
+  return opened ? { ...ran, context: [...(ran.context ?? []), COMMIT_RULE] } : ran
 }
 
 export const register: Register = on => {
@@ -102,11 +112,12 @@ export const register: Register = on => {
     const p = ports($)
     const answer = await runTool(p, e as TodosInput)
     // Claude is changing the list: show it, so its one-line rows never stand alone.
-    if (!(await p.isPaneOpen())) {
+    const opened = !(await p.isPaneOpen())
+    if (opened) {
       await p.openPane({ title: 'Todos' })
     }
 
-    return answer.isError ? { result: answer.text, isError: true as const } : { result: answer.text }
+    return answer.isError ? { result: answer.text, isError: true as const } : withRule<{ result: string; context?: readonly string[] }>({ result: answer.text }, opened)
   })
 
   on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
@@ -118,9 +129,8 @@ export const register: Register = on => {
     const hadTodos = (await p.todos.get()).length > 0
     const { id, subject } = ran.result.task
     await changeTodos(p, list => [...list, { id, title: subject, status: 'pending' as const, commits: [] }])
-    await openIfNew(p, hadTodos)
 
-    return ran
+    return withRule(ran, await openIfNew(p, hadTodos))
   })
 
   on('tool.call', { tool: 'TaskUpdate' }, async ($, e, next) => {
@@ -152,9 +162,8 @@ export const register: Register = on => {
     if (active !== undefined) {
       await p.lastActiveId.update(() => active.id)
     }
-    await openIfNew(p, previous.length > 0)
 
-    return ran
+    return withRule(ran, await openIfNew(p, previous.length > 0))
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
@@ -164,18 +173,15 @@ export const register: Register = on => {
     return ran
   })
 
-  on('prompt.compose', async ($, e, next) => {
-    const composed = await next(e)
+  // While the pane is open each prompt carries the commit rule. Not `prompt.compose`:
+  // under Claude Enterprise the built-in cc-plugin-sec-default plugin skips
+  // user-installed plugins for that event.
+  on('prompt.submit', async ($, e, next) => {
     if (!(await ports($).isPaneOpen())) {
-      return composed
+      return next(e)
     }
 
-    return {
-      sections: [
-        ...composed.sections,
-        { id: 'todo-commits:commit-rule', text: COMMIT_RULE, scope: 'session' },
-      ],
-    }
+    return next({ ...e, context: [...(e.context ?? []), COMMIT_RULE] })
   })
 
   // Written out for the loader, like the tool name above: this is TODO_PANE.
