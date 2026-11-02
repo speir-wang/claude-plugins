@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.4.0...code-review-mod-v1.4.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **code-review-mod, todo-commits:** work under Claude Enterprise's sec-default plugin ([988467c](https://github.com/speir-wang/claude-plugins/commit/988467cb027257fc865172d894b53bfcc5aa9fe9))
+* **code-review-mod:** start reviews and send the rule without skill.prompt or prompt.compose ([ec44bba](https://github.com/speir-wang/claude-plugins/commit/ec44bbab9554f56ac1d77ad4c3f387a92d3cbc0b))
+
 ## [1.4.0](https://github.com/speir-wang/claude-plugins/compare/code-review-mod-v1.3.0...code-review-mod-v1.4.0) (2026-11-01)
 
 
