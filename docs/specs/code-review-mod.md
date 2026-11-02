@@ -183,7 +183,8 @@ Before recording a finding, Claude reads its code, callers and tests and tries t
 - Each mod bringing its own tab to the front when it changes.
 
 **Facts tested before building on them** (from the Claude Code 2.1.288 API):
-- **Skill hook on a typed slash command:** yes. `skill.prompt` fires when you type `/name`, when Claude calls the Skill tool, and when a skill is preloaded. The mod hooks it and adds the rule to the skill's own text.
+- **Skill hook on a typed slash command:** yes. `skill.prompt` fires when you type `/name`, when Claude calls the Skill tool, and when a skill is preloaded. The mod first hooked it and added the rule to the skill's own text.
+- **Under Claude Enterprise (2.1.316):** the built-in `cc-plugin-sec-default` plugin sends `skill.prompt` and `prompt.compose` past user-installed plugins, so neither hook runs. The mod now starts a review from a `tool.call` hook on `Skill` (the rule goes in the result's `context`) and from `prompt.submit` when `e.command.name` is the skill (the rule goes in the prompt's `context`). While a review exists, every prompt carries the rule in its `context`, in place of the old system-prompt section.
 - **Panel to the front:** opening a panel that's already open only changes its title. Opening it with `focus` asks the screen to raise it. That only works while the prompt box is empty. So the mod opens with `focus` when a review or re-check finishes.
 - **Session state on `claude --resume`:** not promised. `$.state` lives for the running process. So the mod also writes the review to the store under the session's id, and reads it back only when that same session starts again. Saved reviews older than 7 days are deleted. No other session reads them.
 - **Is todo-commits installed:** `$.tool.list()` holds `mcp__todo-commits__todos`. Not used in the end: the fix list replaced the link to todo-commits.

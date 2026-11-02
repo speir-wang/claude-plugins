@@ -63,7 +63,6 @@ function world(on: On, stored: Record<string, unknown> = {}): World {
   })
   on('session.start', ($, e) => e as never)
   on('turn.complete', ($, e) => ({ text: e.answer }))
-  on('skill.prompt', ($, e) => ({ text: e.text }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__code-review-mod__${e.name}` } }) as never)
   on('session.id', () => ({ value: w.sessionId }) as never)
   on('store.get', ($, e) => ({ value: w.store[e.key] }) as never)
@@ -143,17 +142,42 @@ async function paneText($: Engine, surface: 'terminal' | 'desktop' = 'terminal')
     .join('\n')
 }
 
-test('the code-review skill opens the panel and carries the rule', async ($, on) => {
+/** Claude runs a skill through the Skill tool; answers what the tool call resolved to. */
+async function runSkill($: Engine, skill: string) {
+  return (await $.tool.call({ tool: 'Skill', tool_use_id: `s${id++}`, skill } as never)) as { result?: unknown; context?: readonly string[] }
+}
+
+/** The user types a slash command: the engine raises prompt.submit with `command` set. */
+async function typeCommand($: Engine, name: string) {
+  await $.prompt.submit({ text: `/${name}`, command: { name, args: '' } } as never)
+}
+
+function expectRule(text: string) {
+  expect(text).toMatch(TOOL)
+  expect(text).toMatch('"xhigh": wrong output, a crash')
+  expect(text).toMatch('Scope creep is a change')
+  expect(text).toMatch('Only for the mattpocock-skills:code-review skill')
+}
+
+test('the code-review skill run by Claude opens the panel and carries the rule', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
-  const prompted = await $.skill.prompt({ skill: SKILL, text: 'Review the branch.' })
+  const ran = await runSkill($, SKILL)
 
-  expect(prompted.text).toMatch(/^Review the branch\./)
-  expect(prompted.text).toMatch(TOOL)
-  expect(prompted.text).toMatch('"xhigh": wrong output, a crash')
-  expect(prompted.text).toMatch('Scope creep is a change')
-  expect(prompted.text).toMatch('Only for the mattpocock-skills:code-review skill')
+  expect(ran.result).toBe('ok')
+  expectRule(ran.context?.join('\n') ?? '')
+  expect(w.opened.map(o => o.id)).toEqual(['code-review-mod'])
+  expect(w.called.map(c => c.tool)).toEqual(['Skill'])
+})
+
+test('the code-review skill typed by the user opens the panel and carries the rule', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  await typeCommand($, SKILL)
+
+  expectRule(w.contexts[0]?.join('\n') ?? '')
   expect(w.opened.map(o => o.id)).toEqual(['code-review-mod'])
 })
 
@@ -161,9 +185,11 @@ test('the built-in /code-review is left alone', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
-  const prompted = await $.skill.prompt({ skill: 'code-review', text: 'Built-in review.' })
+  const ran = await runSkill($, 'code-review')
+  await typeCommand($, 'code-review')
 
-  expect(prompted.text).toBe('Built-in review.')
+  expect(ran.context).toBeUndefined()
+  expect(w.contexts).toEqual([undefined])
   expect(w.opened).toEqual([])
 })
 
@@ -195,15 +221,61 @@ test('a finding with a bad level, or before any start, is refused', async ($, on
   expect((await review($, { action: 'nope' })).isError).toBe(true)
 })
 
-test('the rule is in the system prompt only while there is a review', async ($, on) => {
-  world(on)
-  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'hi', scope: 'shared' }] }))
-  const compose = () => $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] })
+test('each prompt carries the rule only while there is a review', async ($, on) => {
+  const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
-  expect((await compose()).sections.map(s => s.id)).toEqual(['intro'])
+  await $.prompt.submit({ text: 'hello' } as never)
   await review($, { action: 'start', pr: 'feature', head: HEAD })
-  expect((await compose()).sections.map(s => s.id)).toEqual(['intro', 'code-review-mod:rule'])
+  await $.prompt.submit({ text: 'fix 1' } as never)
+
+  expect(w.contexts[0]).toBeUndefined()
+  expect(w.contexts[1]?.length).toBe(1)
+  expectRule(w.contexts[1]?.[0] ?? '')
+})
+
+// Under Claude Enterprise, cc-plugin-sec-default sits in the org's outer tier and sends
+// these events past the user tier. The mod has to work without them.
+test(
+  'with prompt.compose and skill.prompt skipping the user tier, the skill still opens the panel and the rule arrives',
+  {
+    plugins: [
+      {
+        name: 'sec-default-stub',
+        tier: 'prepend',
+        register(on) {
+          on('prompt.compose', ($, e, next) => next.to(e, 'append'))
+          on('skill.prompt', ($, e, next) => next.to(e, 'append'))
+        },
+      },
+    ],
+  },
+  async ($, on) => {
+    const w = world(on)
+    on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'hi', scope: 'shared' }] }))
+    on('skill.prompt', ($, e) => ({ text: e.text }))
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+    const ran = await runSkill($, SKILL)
+    expectRule(ran.context?.join('\n') ?? '')
+    expect(w.opened.map(o => o.id)).toEqual(['code-review-mod'])
+
+    await review($, { action: 'start', pr: 'feature', head: HEAD })
+    await $.prompt.submit({ text: 'fix 1' } as never)
+    expectRule(w.contexts.at(-1)?.join('\n') ?? '')
+  },
+)
+
+test('a PR link with a review open carries both the rule and the re-check note', async ($, on) => {
+  const w = world(on)
+  await startMine($)
+
+  await $.prompt.submit({ text: 're-check https://github.com/acme/shop/pull/7' } as never)
+
+  const context = w.contexts.at(-1) ?? []
+  expect(context.length).toBe(2)
+  expectRule(context[0] ?? '')
+  expect(context[1]).toMatch('acme/shop#7')
 })
 
 test('review tool calls draw as one line in the chat', async ($, on) => {
@@ -966,7 +1038,7 @@ test('when the review ends every row is numbered top to bottom, and "fix 3" mean
 test('while the review runs, empty groups say reviewing and no next step is offered', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await $.skill.prompt({ skill: SKILL, text: 'Review.' })
+  await runSkill($, SKILL)
   await review($, { action: 'start', pr: 'feature', head: HEAD })
 
   const running = await paneText($)
